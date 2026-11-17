@@ -49,7 +49,11 @@ CHECK_SUBTITLE = "Highest value under each method, simulated data only"
 NO_BUILT_IN = "Built-in effects are known only for simulated data."
 NO_BUILT_IN_BEST = "No single built-in best teacher to compare with."
 NO_MARKS = "No marks yet. Teachers upload marks from the Teacher view"
-MARKS_NOTE = "Marks: how the teacher's students rank in the teacher's tests against their average rank in all tests, in percentile points"
+MARKS_NOTE = (
+    "Marks: how the teacher's students rank in the teacher's tests against their average rank in all tests, "
+    "in percentile points. Percentiles average 50 within every test, so this moves only when different "
+    "students sit different tests — it reflects who sat each test, not better marks"
+)
 
 
 def hidden_text(min_lectures: int) -> str:

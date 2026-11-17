@@ -48,6 +48,10 @@ NO_TEACHERS = "No teachers yet — upload a timetable in the Admin view"
 NO_LECTURES = "No lectures with records yet"
 NO_TIMELINE = "No records for this lecture yet"
 NO_MARKS = "No marks uploaded yet"
+MARKS_CAVEAT = (
+    "Marks vs own percentile: percentiles average 50 within every test, so this figure moves only when "
+    "different students sit different tests — it reflects who sat each test, not better marks"
+)
 NO_GROUPS = "No marks yet — upload marks to see student groups"
 NO_GROUP_DATA = "No lecture records for the students of this test yet"
 CAVEAT = "The slot-adjusted figure cannot separate you from a slot you always teach in."
@@ -322,6 +326,8 @@ def figures_row(feedback: dict[str, Any]) -> None:
     for column, (label, figure, comparison, accent) in zip(st.columns([1.25, 1.25, 1, 1]), cards, strict=True):
         with column:
             stat_card(label, figure, comparison, accent)
+    if (feedback.get("marks") or {}).get("value") is not None:
+        st.caption(MARKS_CAVEAT)
 
 
 def lead_card(config: Config, feedback: dict[str, Any]) -> None:

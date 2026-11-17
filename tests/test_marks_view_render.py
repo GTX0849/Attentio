@@ -115,6 +115,12 @@ def test_the_marks_card_shows_the_figure_in_percentile_points_and_the_number_of_
     assert "No marks uploaded yet" not in page
 
 
+def test_the_marks_figure_carries_a_caveat_that_it_reflects_who_sat_each_test(marks_data: dict[str, list[Any]]) -> None:
+    at, _ = teacher_page()
+    assert teacher.MARKS_CAVEAT in [c.value for c in at.caption]
+    assert "who sat" in teacher.MARKS_CAVEAT and "not" in teacher.MARKS_CAVEAT
+
+
 def test_the_wording_of_the_marks_card() -> None:
     def card(marks: dict[str, Any] | None) -> tuple[str, str]:
         return teacher.marks_card({"marks": marks})
@@ -131,6 +137,7 @@ def test_a_teacher_without_marks_sees_a_dash_and_says_no_marks_yet(teacher_data:
     assert teacher.NO_GROUPS in [c.value for c in at.caption]
     assert "Student groups" in [s.value for s in at.subheader]
     assert "pctl" not in page
+    assert teacher.MARKS_CAVEAT not in [c.value for c in at.caption]
 
 
 # ---- the student groups card -------------------------------------------------------------------------------
@@ -316,6 +323,7 @@ def test_the_admin_marks_column_shows_each_teachers_figure(
     assert ">0<" in row("Ms. Fatima Sheikh")
     assert ">+13<" in row("Prof. Sanjay Pillai")
     assert admin_figures.MARKS_NOTE in [c.value for c in at.caption]
+    assert "who sat each test" in admin_figures.MARKS_NOTE
     assert admin_figures.NO_MARKS not in [c.value for c in at.caption]
     assert "STU001" not in page and len(at.dataframe) == 2  # still no student on the view
 
