@@ -7,3 +7,6 @@ __pycache__/
 # worker's unsent-record spool
 .spool/
 *.spool.jsonl
+
+# MediaPipe model files (python -m worker.models download)
+models/

@@ -20,3 +20,18 @@ states:
   eyes_closed_grace_s: 1.5       # closure shorter than this is ignored; from here on it is distracted
   look_down_allowance_s: 8       # seconds of looking down that stay neutral
   allowance_refill_s: 2          # continuous attentive seconds needed to refill the allowance
+
+# Student and teacher figures (backend/metrics.py).
+scores:
+  min_presence_ratio: 0.5        # presence below this over the period shown hides attention; a lecture counts as attended at or above it
+
+# Real readings from the webcam (worker/perception.py, worker/mediapipe_source.py).
+perception:
+  calibration_seconds: 3         # at launch (and on recalibrate) the person looks at the screen this long
+  recalibrate_key: c             # press in the preview window to calibrate again
+  face_model: models/face_landmarker.task          # paths are relative to the project root
+  pose_model: models/pose_landmarker_lite.task     # fetch both with: python -m worker.models download
+  blink_threshold: 0.5           # eyeBlinkLeft and eyeBlinkRight both at or above this = eyes closed
+  shoulder_visibility_threshold: 0.5   # both shoulders' pose visibility at or above this = shoulders present
+  invert_pitch: false            # flip if looking down shows as negative pitch in the preview
+  invert_yaw: false              # flip the sign of yaw (it only matters for the absolute value, so rarely needed)

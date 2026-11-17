@@ -2,7 +2,7 @@
 
 A laptop webcam worker classifies the person in view into attention states and sends one record per student per 30-second window to a FastAPI backend (PostgreSQL). A Streamlit dashboard reads only from the backend over HTTP.
 
-The worker decides states with the rules in the `states:` section of `config/classpulse.yaml` (eyes-closed grace, look-down allowance, pitch and yaw bands). Until real head-pose readings land, it feeds those rules from a face detector only, so a visible face counts as Attentive and no face as Not visible.
+The worker decides states with the rules in the `states:` section of `config/classpulse.yaml` (eyes-closed grace, look-down allowance, pitch and yaw bands). It feeds those rules with real readings from MediaPipe (head pitch and yaw, eyes closed, shoulders in view); see Real readings below.
 
 ## Layout
 
@@ -62,9 +62,45 @@ streamlit run dashboard/app.py
 python -m worker --student STU001 --camera CAM1
 ```
 
-Options: `--no-preview` (no window, stop with Ctrl+C), `--camera-index N`, `--spool PATH`. Frames are never written to disk.
+Options: `--no-preview` (no window, stop with Ctrl+C), `--camera-index N`, `--spool PATH`, `--detector {mediapipe,haar}` (default `mediapipe`; `haar` is the old face-only fallback), `--debug` (log every reading). Frames are never written to disk. Download the models first (next section).
 
 If a window cannot be sent (for example the backend is stopped), the worker appends it to `.spool/unsent.jsonl` and resends everything spooled with the next window and at start-up. Stopping and restarting the backend loses nothing.
+
+## Real readings
+
+**Download the models once** (about 9.5 MB; written to the git-ignored `models/` folder, files already present are skipped):
+
+```powershell
+python -m worker.models download
+```
+
+This fetches only the official MediaPipe `face_landmarker` and `pose_landmarker_lite` (float16, latest) from `storage.googleapis.com/mediapipe-models`. Without them `python -m worker` stops with a message telling you to run this.
+
+**What MediaPipe 1.2.3 provides, and the route taken.** This version has only the Tasks API (no `mp.solutions`). FaceLandmarker there can output a facial transformation matrix (`output_facial_transformation_matrixes`) and blendshapes (`output_face_blendshapes`, including `eyeBlinkLeft` and `eyeBlinkRight`), so both are used and no `solvePnP` or eye-aspect-ratio code was needed:
+
+- Head pitch and yaw come from the rotation part of the transformation matrix (the direction the face points).
+- Eyes closed means both `eyeBlinkLeft` and `eyeBlinkRight` are at or above `perception.blink_threshold`. The raw value goes to the rules, which apply the 1.5 s grace.
+- Shoulders come from PoseLandmarker (lite): both shoulder landmarks need a visibility at or above `perception.shoulder_visibility_threshold`.
+- Both models run in VIDEO mode on the unmirrored camera frame. Only the preview is mirrored.
+
+**Calibration.** At launch, look at the screen for `perception.calibration_seconds` (3 s). The mean raw pitch and yaw over that time (face frames only) become the zero, and every later reading is relative to it. While calibrating, readings still go to the state rules but carry pitch 0 and yaw 0 (looking at the screen), so the first seconds count as Attentive. If nobody is in view, calibration waits for a face. Press the key in `perception.recalibrate_key` (`c`) in the preview window to calibrate again at any time. There is no key with `--no-preview`.
+
+**Sign flags.** Positive pitch must mean looking down, and the preview shows the value live. The signs were derived from the matrix maths and the live check showed sensible magnitudes, but a human pose could not be judged. If looking down shows a negative pitch, set `perception.invert_pitch: true` in `config/classpulse.yaml`. `invert_yaw` flips yaw; only its absolute value is used by the rules, so it is mostly cosmetic.
+
+**Preview window.** The mirrored video with a banner in the dashboard state colour (Attentive `#1B5FD0`, Neutral `#9DB3D6`, Distracted `#D4622A`, Not visible `#C9CDD2`), relative pitch and yaw, eyes open or closed, the look-down allowance left, and a "Calibrating..." overlay. `q` quits and flushes the partial window.
+
+**Demo script (act it out, about two minutes).** Start the worker, look at the screen through the 3 s calibration, then:
+
+| Do this | Expect |
+| --- | --- |
+| Watch the screen | Mostly Attentive |
+| Take notes at a normal rhythm (glance down and back up) | Mostly Neutral or Attentive |
+| Hold a phone in your lap (head down) | Neutral for the allowance (8 s), then Distracted |
+| Close your eyes | Attentive for 1.5 s, then Distracted |
+| Put your head down on the desk with your shoulders still in view | Distracted |
+| Leave the frame | Not visible |
+
+If the readings look off, run `python -m worker --student STU001 --camera CAM1 --debug --no-preview` to log pitch, yaw, eyes and state for every frame.
 
 ## Timetable, lectures and sessions
 

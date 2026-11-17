@@ -109,6 +109,33 @@ class StateClassifier:
         """End of stream: the state changes up to `timestamp`, which hold until then."""
         return self._advance(max(timestamp, self._now))
 
+    def current_state(self, at: float) -> AttentionState | None:
+        """The state in force at time `at` (not before the last reading), or None before any reading.
+
+        Read-only; for displays. It does not change what later readings produce.
+        """
+        if self._held is None:
+            return None
+        return self._state_at(self._held, max(at, self._now), self._now)
+
+    def look_down_remaining_s(self, at: float) -> float:
+        """Seconds of look-down allowance left at time `at`, counting the current hold. Read-only."""
+        th = self._th
+        r = self._held
+        if r is None:
+            return th.look_down_allowance_s
+        at = max(at, self._now)
+        if (
+            self._attentive_since is not None
+            and self.current_state(at) is _ATT
+            and at - self._attentive_since >= th.allowance_refill_s
+        ):
+            return th.look_down_allowance_s  # long enough attentive: the allowance has refilled
+        used = self._down_used
+        if r.face_present and self._band(r) is _NEU:
+            used += at - self._now
+        return max(0.0, th.look_down_allowance_s - used)
+
     # -- internals ---------------------------------------------------------------
 
     def _advance(self, t: float) -> list[Transition]:

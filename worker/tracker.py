@@ -22,6 +22,14 @@ class AttentionTracker:
         records = self._feed(self._classifier.close(timestamp))
         return records + self._aggregator.flush(timestamp)
 
+    def current_state(self, at: float) -> AttentionState | None:
+        """The state in force at `at`, for the preview (read-only)."""
+        return self._classifier.current_state(at)
+
+    def look_down_remaining_s(self, at: float) -> float:
+        """Look-down allowance left at `at`, for the preview (read-only)."""
+        return self._classifier.look_down_remaining_s(at)
+
     def _feed(self, transitions: list[tuple[float, AttentionState]]) -> list[AttentionRecord]:
         records: list[AttentionRecord] = []
         for t, state in transitions:
