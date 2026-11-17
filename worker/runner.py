@@ -9,9 +9,10 @@ import cv2
 from shared.config import PROJECT_ROOT, Config
 from worker.client import HttpSender
 from worker.delivery import Delivery, Spool
-from worker.detector import FaceDetector
-from worker.temporary_rule import classify
-from worker.windows import WindowAggregator
+from worker.detector import HaarReadingSource
+from worker.readings import ReadingSource
+from worker.states import StateThresholds
+from worker.tracker import AttentionTracker
 
 log = logging.getLogger("worker")
 
@@ -34,8 +35,10 @@ def run(
         log.error("Could not open the webcam (index %d)", camera_index)
         return 1
 
-    detector = FaceDetector()
-    aggregator = WindowAggregator(camera, student, config.window_seconds)
+    source: ReadingSource = HaarReadingSource()  # CLA-10 swaps in the real perception here
+    tracker = AttentionTracker(
+        camera, student, config.window_seconds, StateThresholds.from_config(config.raw)
+    )
     frame_interval = 1.0 / config.target_fps
     log.info("Running for %s on %s. Press q in the preview window or Ctrl+C to stop.", student, camera)
 
@@ -44,11 +47,11 @@ def run(
         while True:
             ok, frame = capture.read()
             now = time.time()
-            face = bool(ok) and detector.has_face(frame)
-            delivery.deliver(aggregator.observe(now, classify(face)))
+            reading = source.read(frame if ok else None, now)
+            delivery.deliver(tracker.observe(reading))
 
             if preview and ok:
-                label = "face" if face else "no face"
+                label = "face" if reading.face_present else "no face"
                 cv2.putText(frame, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                 cv2.imshow("ClassPulse worker (q to quit)", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -66,6 +69,6 @@ def run(
         capture.release()
         if preview:
             cv2.destroyAllWindows()
-        delivery.deliver(aggregator.flush(time.time()))  # the partial window
+        delivery.deliver(tracker.flush(time.time()))  # the partial window
         log.info("Stopped.")
     return 0

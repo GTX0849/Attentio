@@ -1,5 +1,5 @@
 # Shared configuration for worker, backend and dashboard.
-# Later tickets add thresholds (state rules etc.) to this file.
+# Thresholds for the attention state rules are in the `states:` section.
 worker:
   target_fps: 10        # frames processed per second
   window_seconds: 30    # length of one attention record window
@@ -9,3 +9,14 @@ backend:
 
 dashboard:
   refresh_seconds: 10
+
+# Attention state rules (worker/states.py). Angles are degrees relative to the
+# student's calibration pose; positive pitch = looking down.
+states:
+  pitch_attentive_min_deg: -10   # attentive pitch band: -10 to +15
+  pitch_attentive_max_deg: 15
+  pitch_neutral_max_deg: 38      # neutral band: above +15 up to +38; beyond that (or below -10) is distracted
+  yaw_max_deg: 25                # |yaw| above this is distracted
+  eyes_closed_grace_s: 1.5       # closure shorter than this is ignored; from here on it is distracted
+  look_down_allowance_s: 8       # seconds of looking down that stay neutral
+  allowance_refill_s: 2          # continuous attentive seconds needed to refill the allowance
