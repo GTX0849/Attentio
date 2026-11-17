@@ -109,6 +109,15 @@ def list_teacher_feedback(backend_url: str) -> list[dict[str, Any]]:
     return rows
 
 
+def get_admin_overview(backend_url: str) -> dict[str, Any]:
+    """Teacher figures with class averages, attendance by section and unassigned windows.
+
+    Totals only, nothing about an individual student. See GET /api/admin/overview.
+    """
+    body: dict[str, Any] = _call(backend_url, "GET", "/api/admin/overview")
+    return body
+
+
 def get_lecture_timeline(backend_url: str, lecture_id: int) -> dict[str, Any]:
     """Class attention per 30-second window of one lecture. See GET /api/lectures/{id}/timeline."""
     body: dict[str, Any] = _call(backend_url, "GET", f"/api/lectures/{lecture_id}/timeline")

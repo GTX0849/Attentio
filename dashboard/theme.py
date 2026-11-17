@@ -88,6 +88,14 @@ def page_header_html(eyebrow: str, title: str, context_line: str = "") -> str:
     )
 
 
+def section_heading_html(title: str) -> str:
+    """A heading for a block below the page header, with a rule above it."""
+    return (
+        f'<div style="border-top:1px solid {BORDER};margin:20px 0 4px 0;padding-top:16px;'
+        f'font-size:20px;font-weight:600;color:{TEXT};">{escape(title)}</div>'
+    )
+
+
 def live_indicator_html(text: str, live: bool = True) -> str:
     """A small right-aligned status line with a dot: blue while records are arriving, grey if not."""
     dot = PRIMARY if live else STATE_COLOURS["Not visible"]
@@ -140,6 +148,10 @@ def stat_card(label: str, figure: str, comparison: str, accent: bool = False) ->
 def page_header(eyebrow: str, title: str, context_line: str = "") -> None:
     """Eyebrow (small caps), page title and an optional context line."""
     st.html(page_header_html(eyebrow, title, context_line))
+
+
+def section_heading(title: str) -> None:
+    st.html(section_heading_html(title))
 
 
 def live_indicator(text: str, live: bool = True) -> None:

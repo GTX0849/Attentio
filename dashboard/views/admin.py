@@ -1,7 +1,10 @@
-"""Admin view: weekly timetable, manual sessions and recent lectures.
+"""Admin view: teacher feedback for all teachers, then the weekly timetable, manual sessions and
+recent lectures.
 
-Later tickets add the teacher-figures table to this view. The three sections
-below are separate functions and share only the data passed to them.
+The feedback part (`feedback_section`) is drawn from GET /api/admin/overview; the wording and the
+markup are in `dashboard/admin_figures.py`. It holds totals per teacher and per section, never a
+figure for an individual student. The three timetable sections below it are separate functions
+and share only the data passed to them.
 
 The sidebar holds the controls (`sidebar_controls`): the timetable file picker
 and the manual-session pickers. The main area holds what they act on: the
@@ -16,10 +19,10 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from dashboard import api
+from dashboard import admin_figures, api
 from dashboard.api import BackendError
 from dashboard.simulation import show_banner
-from dashboard.theme import page_header
+from dashboard.theme import page_header, section_heading
 from shared.config import Config
 
 UPLOAD_KEY = "timetable_file"
@@ -131,32 +134,63 @@ def _apply_timetable(backend_url: str) -> None:
 # ---- main area -------------------------------------------------------------------
 
 
+TITLE = "Teacher feedback, all teachers"
+
+
 def render(config: Config) -> None:
+    simulation = _simulation(config)
+    if simulation is not None:
+        show_banner(config)
+    feedback_section(config, simulation)
+    section_heading("Timetable and sessions")
     try:
         timetable = api.get_timetable(config.backend_url)
     except BackendError as e:
-        page_header("Admin", "Timetable and sessions")
         st.error(str(e))
         return
     tz = ZoneInfo(timetable["timezone"])
-    if _simulation_loaded(config):
-        show_banner(config)
-    page_header(
-        "Admin",
-        "Timetable and sessions",
-        f"Timetable times are local time in {timetable['timezone']}. Records are stored in UTC.",
-    )
+    st.caption(f"Timetable times are local time in {timetable['timezone']}. Records are stored in UTC.")
     timetable_section(config, timetable)
     sessions_section(config, tz)
     lectures_section(config, tz)
 
 
-def _simulation_loaded(config: Config) -> bool:
-    """True when simulated data may be among the timetable and lectures shown."""
+def _simulation(config: Config) -> dict[str, Any] | None:
+    """What the loaded simulation holds, or None when there is none (or it cannot be read)."""
     try:
-        return api.get_simulation(config.backend_url) is not None
+        return api.get_simulation(config.backend_url)
     except BackendError:
-        return False
+        return None
+
+
+def feedback_section(config: Config, simulation: dict[str, Any] | None) -> None:
+    """Header, the figures table, attendance by section and the built-in comparison."""
+    try:
+        overview = api.get_admin_overview(config.backend_url)
+    except BackendError as e:
+        page_header("Admin", TITLE)
+        st.error(str(e))
+        return
+    page_header(
+        "Admin",
+        TITLE,
+        f"Listed alphabetically, not ranked · figures hidden below {overview['min_lectures']} lectures",
+    )
+    effects = simulation["effects"] if simulation is not None else None
+    st.html(admin_figures.figures_table_html(overview, effects))
+    st.caption(admin_figures.NOTE)
+    left, right = st.columns([1, 1.4])
+    with left:
+        st.html(admin_figures.attendance_card_html(overview))
+    with right:
+        if effects is None:
+            st.caption(admin_figures.NO_BUILT_IN)
+            return
+        rows = admin_figures.order_check(overview["teachers"], effects)
+        if rows:
+            st.html(admin_figures.check_card_html(rows))
+        else:
+            st.caption(admin_figures.NO_BUILT_IN_BEST)
 
 
 def timetable_section(config: Config, timetable: dict[str, Any]) -> None:

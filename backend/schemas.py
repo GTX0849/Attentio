@@ -365,9 +365,38 @@ class TeacherSummary(BaseModel):
     n_lectures: int  # lectures with records
     hidden: bool  # fewer lectures than `min_lectures`
     reason: str | None  # why there is no value: "fewer than 5 lectures", or no student had enough data
+    class_average: float | None  # plain attention (0 to 1) over all seconds in the teacher's lectures; kept while hidden
     self_comparison: TeacherFigureOut  # the teacher's students against their own average, points
     slot_adjusted: TeacherFigureOut  # the same after removing each time slot's average effect
     attendance: TeacherAttendance
+
+
+class SectionAttendance(BaseModel):
+    """Attendance across one section's lectures. No individual student appears here."""
+
+    section_id: int
+    section: str
+    simulated: bool
+    n_students: int  # students who belong to the section
+    n_lectures: int  # the section's lectures with records
+    present: int  # students in view for at least `min_presence_ratio` of a lecture, summed over lectures
+    expected: int
+    rate: float | None  # present / expected; None with no lectures
+
+
+class AdminOverview(BaseModel):
+    """Everything the admin view shows, from one pass over the records.
+
+    Teachers and sections are alphabetical. Nothing here is about an individual student.
+    """
+
+    timezone: str
+    now: datetime
+    min_lectures: int
+    range_level: float
+    teachers: list[TeacherSummary]
+    sections: list[SectionAttendance]
+    unassigned_windows: int  # attention records (30-second windows) with no lecture
 
 
 class TeacherFeedback(TeacherSummary):

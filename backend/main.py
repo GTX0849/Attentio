@@ -29,6 +29,7 @@ from backend.models import (
     TimetableSlot,
 )
 from backend.schemas import (
+    AdminOverview,
     CameraOut,
     CameraRegistration,
     CurrentResponse,
@@ -342,6 +343,15 @@ def create_app(
         For the admin view. Worked out in one pass; see backend/teacher_figures.py.
         """
         return teacher_feedback.build_all(session, clock(), tz, teacher_settings, min_presence)
+
+    @app.get("/api/admin/overview")
+    def admin_overview(session: SessionDep) -> AdminOverview:
+        """The admin view in one answer: every teacher's figures (with the plain class average),
+        attendance by section and the number of unassigned record windows.
+
+        Totals per teacher and per section only; no figure for any individual student.
+        """
+        return teacher_feedback.build_overview(session, clock(), tz, teacher_settings, min_presence)
 
     @app.get("/api/teachers/{teacher_id}/feedback")
     def get_teacher_feedback(teacher_id: int, session: SessionDep) -> TeacherFeedback:

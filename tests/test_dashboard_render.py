@@ -169,6 +169,17 @@ NO_TEACHER_FEEDBACK = {
 }
 
 
+EMPTY_OVERVIEW = {
+    "timezone": "Asia/Kolkata",
+    "now": "2026-03-02T05:06:00Z",
+    "min_lectures": 5,
+    "range_level": 0.95,
+    "teachers": [],
+    "sections": [],
+    "unassigned_windows": 0,
+}
+
+
 @pytest.fixture
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Replace the dashboard's HTTP calls; the returned dict records what was sent."""
@@ -206,6 +217,7 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         open_sessions.clear()
         return {**LECTURE, "open": False}
 
+    monkeypatch.setattr(api, "get_admin_overview", lambda url: EMPTY_OVERVIEW)
     monkeypatch.setattr(api, "get_teacher_feedback", lambda url, teacher_id: NO_TEACHER_FEEDBACK)
     monkeypatch.setattr(api, "get_lecture_timeline", lambda url, lecture_id: {"points": []})
     monkeypatch.setattr(student, "get_live", lambda url, reg, minutes: [])

@@ -191,6 +191,17 @@ The defaults are in the `simulator:` section of `config/classpulse.yaml`: 2 sect
 
 **Before a demo, reseed.** The data ends on the day it was generated, so "the last 4 weeks" move on. Run `python -m simulator seed` on the day (it wipes the old simulation first), and `python -m simulator wipe` to take it all out. Live data (`STU001`, `R101`, `CAM1`, the live timetable and live records) is never touched by either.
 
+## Admin view
+
+The Admin view opens with feedback for all teachers, then the timetable, manual sessions and recent lectures below it. It reads `GET /api/admin/overview`, which holds totals per teacher and per section and no figure for any individual student.
+
+- **Attention figures with 95% ranges.** One row per teacher, alphabetical and never sorted by a score. Columns: lectures, the plain class average (attentive / (attentive + distracted) from the summed seconds of every record in the teacher's lectures, with the same presence gate; unassigned records are ignored), the self-comparison ("Vs own average") and the slot-adjusted figure as range bars from -10 to +10 points (pale bar is the range, dot is the figure), and marks (a dash until marks are uploaded). Below `teachers.min_lectures` lectures the two figures are replaced by "Figures appear after 5 lectures"; the class average stays. With simulated data a Built-in column shows each teacher's true effect.
+- **Attendance by section.** The present rate across each section's lectures and its size, then the number of unassigned record windows (records that matched no lecture).
+- **Does each figure find the built-in best teacher?** Only with simulated data. For each method, the teacher with the highest value, marked "matches" when that is the teacher with the largest built-in effect and "wrong" when it is not. Teachers whose figures are hidden are not named.
+- The slot-adjusted figure cannot separate a teacher from a slot they always teach in, and the page says so. The figures are feedback, not a ranking.
+
+**Demo.** Reseed with `python -m simulator seed` (the data ends on the day it was generated), pick Admin under View as, and read the comparison card. On the default cohort the plain class average and the self-comparison both put Prof. Rahul Bhat first (he teaches only the better section, in the mornings), and the slot-adjusted figure puts Dr. Anita Menon first, the teacher built to be best. On the small cohort (`seed --small`) the plain class average is also wrong and the slot-adjusted figure is right; the self-comparison is wrong there too.
+
 ## Pointing at another backend
 
 Set `CLASSPULSE_BACKEND_URL` (in the environment, or in `.env`) to override `backend.url` in `config/classpulse.yaml` for the dashboard, the worker and the simulator, for example:
@@ -230,7 +241,8 @@ Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
 **Teacher feedback** (see Teacher figures above; times in UTC, figures in percentage points)
 
 - `GET /api/teachers/{id}/feedback` returns `{"teacher_id", "teacher", "simulated", "timezone", "now", "min_lectures", "range_level", "n_lectures", "hidden", "reason", "self_comparison": {"value", "low", "high", "n_students"}, "slot_adjusted": {...}, "attendance": {"present", "expected", "rate"}, "lectures": [{"lecture", "present", "expected", "in_progress", "attention": figure}]}`. Lectures are the teacher's own, newest first; nothing about other teachers is returned. While `hidden` the figures are all `null` and `reason` is "fewer than 5 lectures". Unknown teacher returns 404.
-- `GET /api/teachers/feedback` returns the same summary (without `lectures`) for every teacher, sorted by name, from one pass over the records. It is for the admin view.
+- `GET /api/teachers/feedback` returns the same summary (without `lectures`) for every teacher, sorted by name, from one pass over the records. Every summary also carries `class_average`: the plain attention (0 to 1) from the summed seconds of all records in the teacher's lectures, with the presence gate, or `null`; it is kept while the figures are hidden.
+- `GET /api/admin/overview` returns `{"timezone", "now", "min_lectures", "range_level", "teachers": [the summaries above], "sections": [{"section_id", "section", "simulated", "n_students", "n_lectures", "present", "expected", "rate"}], "unassigned_windows"}` from one pass over the records. Sections are sorted by name; `rate` is present over expected across the section's lectures (`null` with none); `unassigned_windows` counts records with no lecture. Nothing in it is about an individual student.
 - `GET /api/lectures/{id}/timeline` returns `{"lecture", "window_seconds", "points": [{"window", "offset_seconds", "students", "attentive", "distracted", "attention"}]}`: class attention per 30-second window counted from the lecture's start, only for windows that have records. Unknown lecture returns 404.
 
 **Timetable**

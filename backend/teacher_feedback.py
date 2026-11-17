@@ -22,10 +22,12 @@ from sqlalchemy.orm import Session
 from backend import metrics, teacher_figures
 from backend.lectures import MANUAL
 from backend.metrics import Seconds
-from backend.models import AttentionRecordRow, Lecture, Student, Teacher
+from backend.models import AttentionRecordRow, Lecture, Section, Student, Teacher
 from backend.schemas import (
+    AdminOverview,
     FigureOut,
     LectureOut,
+    SectionAttendance,
     TeacherAttendance,
     TeacherFeedback,
     TeacherFigureOut,
@@ -103,8 +105,21 @@ def _lecture_row(data: _Data, lecture: Lecture, now: datetime, min_presence: flo
     )
 
 
+def _class_averages(data: _Data, min_presence: float) -> dict[int, float | None]:
+    """Plain attention per teacher: summed seconds of every record in their lectures, with the gate."""
+    sums: dict[int, Seconds] = defaultdict(Seconds)
+    for lecture_id, students in data.cells.items():
+        teacher_id = data.lectures[lecture_id].teacher_id
+        sums[teacher_id] = sums[teacher_id] + metrics.total_seconds(students.values())
+    return {t: metrics.attention_figure(total, min_presence).value for t, total in sums.items()}
+
+
 def _summary(
-    teacher: Teacher, figures: TeacherFigures | None, rows: list[TeacherLectureRow], settings: TeacherSettings
+    teacher: Teacher,
+    figures: TeacherFigures | None,
+    rows: list[TeacherLectureRow],
+    settings: TeacherSettings,
+    class_average: float | None,
 ) -> TeacherSummary:
     present = sum(r.present for r in rows)
     expected = sum(r.expected for r in rows)
@@ -120,6 +135,7 @@ def _summary(
         n_lectures=figures.n_lectures,
         hidden=figures.hidden,
         reason=figures.reason,
+        class_average=class_average,
         self_comparison=TeacherFigureOut.from_figure(figures.self_comparison),
         slot_adjusted=TeacherFigureOut.from_figure(figures.slot_adjusted),
         attendance=TeacherAttendance(
@@ -128,24 +144,88 @@ def _summary(
     )
 
 
-def _teacher_rows(
-    data: _Data, now: datetime, min_presence: float
-) -> dict[int, list[TeacherLectureRow]]:
+def _lecture_rows(data: _Data, now: datetime, min_presence: float) -> list[TeacherLectureRow]:
+    """One row per lecture with records, newest first."""
+    ordered = sorted(data.lectures.values(), key=lambda x: (x.starts_at, x.id), reverse=True)
+    return [_lecture_row(data, lecture, now, min_presence) for lecture in ordered]
+
+
+def _teacher_rows(rows: list[TeacherLectureRow]) -> dict[int, list[TeacherLectureRow]]:
     out: dict[int, list[TeacherLectureRow]] = defaultdict(list)
-    for lecture in sorted(data.lectures.values(), key=lambda x: (x.starts_at, x.id), reverse=True):
-        out[lecture.teacher_id].append(_lecture_row(data, lecture, now, min_presence))
+    for row in rows:
+        out[row.lecture.teacher_id].append(row)
     return out
+
+
+def _section_attendance(session: Session, data: _Data, rows: list[TeacherLectureRow]) -> list[SectionAttendance]:
+    """Present over expected across each section's lectures, and its size. Every section is listed."""
+    by_section: dict[int, list[TeacherLectureRow]] = defaultdict(list)
+    for row in rows:
+        if row.lecture.section_id is not None:
+            by_section[row.lecture.section_id].append(row)
+    out = []
+    for section in session.scalars(select(Section).order_by(Section.name)):
+        lectures = by_section.get(section.id, [])
+        present = sum(r.present for r in lectures)
+        expected = sum(r.expected for r in lectures)
+        out.append(
+            SectionAttendance(
+                section_id=section.id,
+                section=section.name,
+                simulated=section.simulated,
+                n_students=data.section_sizes.get(section.id, 0),
+                n_lectures=len(lectures),
+                present=present,
+                expected=expected,
+                rate=present / expected if expected else None,
+            )
+        )
+    return out
+
+
+def _unassigned_windows(session: Session) -> int:
+    return int(session.scalar(select(func.count()).select_from(Row).where(Row.lecture_id.is_(None))) or 0)
+
+
+def _everyone(
+    session: Session, data: _Data, now: datetime, tz: ZoneInfo, settings: TeacherSettings, min_presence: float
+) -> tuple[list[TeacherSummary], list[TeacherLectureRow]]:
+    figures = _figures(data, tz, settings, min_presence)
+    rows = _lecture_rows(data, now, min_presence)
+    by_teacher = _teacher_rows(rows)
+    averages = _class_averages(data, min_presence)
+    teachers = session.scalars(select(Teacher).order_by(Teacher.name)).all()
+    summaries = [
+        _summary(t, figures.get(t.id), by_teacher.get(t.id, []), settings, averages.get(t.id)) for t in teachers
+    ]
+    return summaries, rows
 
 
 def build_all(
     session: Session, now: datetime, tz: ZoneInfo, settings: TeacherSettings, min_presence: float
 ) -> list[TeacherSummary]:
     """Every teacher's figures and attendance, by name."""
+    return _everyone(session, _load(session), now, tz, settings, min_presence)[0]
+
+
+def build_overview(
+    session: Session, now: datetime, tz: ZoneInfo, settings: TeacherSettings, min_presence: float
+) -> AdminOverview:
+    """Teachers, sections and the unassigned count for the admin view, from one pass over the records.
+
+    Only totals and figures per teacher and per section: no individual student is returned.
+    """
     data = _load(session)
-    figures = _figures(data, tz, settings, min_presence)
-    rows = _teacher_rows(data, now, min_presence)
-    teachers = session.scalars(select(Teacher).order_by(Teacher.name)).all()
-    return [_summary(t, figures.get(t.id), rows.get(t.id, []), settings) for t in teachers]
+    summaries, rows = _everyone(session, data, now, tz, settings, min_presence)
+    return AdminOverview(
+        timezone=tz.key,
+        now=now,
+        min_lectures=settings.min_lectures,
+        range_level=settings.range_level,
+        teachers=summaries,
+        sections=_section_attendance(session, data, rows),
+        unassigned_windows=_unassigned_windows(session),
+    )
 
 
 def build_one(
@@ -159,8 +239,9 @@ def build_one(
     """One teacher's feedback. Only that teacher's lectures are returned."""
     data = _load(session)
     figures = _figures(data, tz, settings, min_presence)
-    rows = _teacher_rows(data, now, min_presence).get(teacher.id, [])
-    summary = _summary(teacher, figures.get(teacher.id), rows, settings)
+    rows = _teacher_rows(_lecture_rows(data, now, min_presence)).get(teacher.id, [])
+    average = _class_averages(data, min_presence).get(teacher.id)
+    summary = _summary(teacher, figures.get(teacher.id), rows, settings, average)
     return TeacherFeedback(
         **summary.model_dump(),
         timezone=tz.key,
