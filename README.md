@@ -64,6 +64,8 @@ python -m worker --student STU001 --camera CAM1
 
 Options: `--no-preview` (no window, stop with Ctrl+C), `--camera-index N`, `--spool PATH`, `--detector {mediapipe,haar}` (default `mediapipe`; `haar` is the old face-only fallback), `--debug` (log every reading). Frames are never written to disk. Download the models first (next section).
 
+The worker runs four things at once: a capture thread reads the camera continuously, the preview shows every frame live (about 30 fps) with the latest state drawn on it, scoring samples the newest frame at `worker.target_fps` (10), and finished windows are sent in the background. A slow or stopped backend therefore never freezes the preview; unsent windows wait in the spool and are retried every 5 seconds.
+
 If a window cannot be sent (for example the backend is stopped), the worker appends it to `.spool/unsent.jsonl` and resends everything spooled with the next window and at start-up. Stopping and restarting the backend loses nothing.
 
 ## Real readings
