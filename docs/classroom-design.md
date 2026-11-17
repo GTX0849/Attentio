@@ -118,7 +118,7 @@ The classroom version adds real logins and keeps the prototype's per-role data l
 | Teacher | Only their own lectures and figures | Other teachers' lectures or figures |
 | Admin | All teachers' figures, listed alphabetically | Per-student attention |
 
-The alphabetical order is deliberate, so that the list is not read as a ranking. These limits are enforced in FastAPI, not only in the dashboard, so replacing Streamlit later does not weaken them. A student's login is linked to their register number.
+The alphabetical order is deliberate, so that the list is not read as a ranking. These limits are enforced in FastAPI, not only in the dashboard, so replacing Streamlit later does not weaken them. People sign in with an email and a password, and the role comes from the account. A student's login is linked to their register number and a teacher's to their name in the timetable. The prototype implements this: see Signing in in the README.
 
 ## 8. Consent and privacy under India's DPDP Act
 

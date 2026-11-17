@@ -24,7 +24,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from dashboard import api
+from dashboard import api, session
 from dashboard.api import BackendError
 from dashboard.simulation import show_banner
 from dashboard.theme import (
@@ -39,12 +39,10 @@ from dashboard.theme import (
 )
 from shared.config import Config
 
-TEACHER_KEY = "teacher_name"  # set by the sidebar's teacher select
 LECTURE_KEY = "teacher_lecture"  # the lecture picker; the teacher's id is added so each teacher keeps their own
 TITLE = "Feedback on your lectures"
 NO_DATA = "—"
 RECENT_LECTURES = 8  # rows in the Recent lectures table
-NO_TEACHERS = "No teachers yet — upload a timetable in the Admin view"
 NO_LECTURES = "No lectures with records yet"
 NO_TIMELINE = "No records for this lecture yet"
 NO_MARKS = "No marks uploaded yet"
@@ -71,22 +69,16 @@ INSUFFICIENT = "Insufficient data"
 
 
 def render(config: Config) -> None:
-    try:
-        teachers = api.list_teachers(config.backend_url)
-    except BackendError as e:
+    """The signed-in teacher's own view. The teacher comes from the account, never from a picker."""
+    identity = session.current()
+    if identity is None or identity.teacher_id is None:
         page_header("Teacher", TITLE)
-        st.error(str(e))
-        return
-    chosen = st.session_state.get(TEACHER_KEY)
-    teacher = next((t for t in teachers if t["name"] == chosen), None)
-    if teacher is None:
-        page_header("Teacher", TITLE, "Select a teacher in the sidebar")
-        st.info(NO_TEACHERS if not teachers else "Select a teacher in the sidebar")
+        st.error("This account is not linked to a teacher")
         return
     try:
-        feedback = api.get_teacher_feedback(config.backend_url, teacher["id"])
+        feedback = api.get_teacher_feedback(config.backend_url, identity.teacher_id)
     except BackendError as e:
-        page_header(f"Teacher · {teacher['name']}", TITLE)
+        page_header(f"Teacher · {identity.display_name}", TITLE)
         st.error(str(e))
         return
 
@@ -429,11 +421,6 @@ def student_groups(config: Config, feedback: dict[str, Any]) -> None:
 # ---- marks upload ----------------------------------------------------------------------------------------
 
 
-def teacher_subjects(timetable: dict[str, Any], teacher_name: str) -> list[str]:
-    """The subjects the teacher is timetabled for, alphabetical."""
-    return sorted({s["subject"] for s in timetable["slots"] if s["teacher"] == teacher_name})
-
-
 def sidebar_controls(config: Config, teacher: dict[str, Any]) -> None:
     """The marks upload for the selected teacher: file, subject, test date, optional name and the button.
 
@@ -443,7 +430,7 @@ def sidebar_controls(config: Config, teacher: dict[str, Any]) -> None:
     st.markdown("**Upload marks**")
     try:
         subjects = {s["name"]: s["id"] for s in api.list_subjects(config.backend_url)}
-        own = teacher_subjects(api.get_timetable(config.backend_url), teacher["name"])
+        own = [s["name"] for s in api.list_teacher_subjects(config.backend_url, teacher["id"])]
     except BackendError as e:
         st.warning(str(e))
         return

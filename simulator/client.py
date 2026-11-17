@@ -9,15 +9,18 @@ the batch ingest endpoint. It never writes to the database itself.
 in tests (with an empty `base_url`).
 """
 
+import secrets
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
 
+from shared.config import demo_password as configured_demo_password
+from shared.emails import staff_email, student_email
 from simulator.config import SimulatorConfig
 from simulator.generate import (
     SimStudent,
@@ -32,6 +35,7 @@ from simulator.generate import (
 from simulator.timetable import camera_for, room_for, timetable_csv
 
 REQUEST_TIMEOUT_SECONDS = 300
+SERVICE_KEY_HEADER = "X-ClassPulse-Key"
 
 
 class SimulatorError(Exception):
@@ -49,15 +53,25 @@ class TimeoutSession(requests.Session):
 class Backend:
     """Thin wrapper over the HTTP client that raises `SimulatorError` on any failure."""
 
-    def __init__(self, http: Any, base_url: str = "") -> None:
+    def __init__(self, http: Any, base_url: str = "", service_key: str | None = None) -> None:
         self._http = http
         self._base = base_url.rstrip("/")
+        self._headers = {SERVICE_KEY_HEADER: service_key} if service_key else {}
 
     def call(self, method: str, path: str, **kwargs: Any) -> Any:
+        if self._headers:
+            kwargs["headers"] = {**self._headers, **kwargs.get("headers", {})}
         try:
             resp = self._http.request(method, f"{self._base}{path}", **kwargs)
         except requests.RequestException as e:
             raise SimulatorError(f"Cannot reach the backend at {self._base}: {e}") from e
+        if resp.status_code in (401, 403):
+            hint = (
+                "the service key is wrong; it must match the backend's CLASSPULSE_SERVICE_KEY"
+                if self._headers
+                else "set CLASSPULSE_SERVICE_KEY (the same value as the backend's) in .env"
+            )
+            raise SimulatorError(f"{method} {path} was refused ({resp.status_code}): {hint}")
         if resp.status_code >= 400:
             raise SimulatorError(f"{method} {path} failed ({resp.status_code}): {resp.text[:300]}")
         return resp.json()
@@ -71,6 +85,16 @@ class SeedReport:
     seconds: float
     tests: int = 0  # marks tests uploaded
     marks: int = 0  # marks in them
+    accounts: tuple["DemoAccount", ...] = ()  # the simulated accounts that were created
+    demo_password: str = field(default="", repr=False)  # their shared password
+    password_generated: bool = False  # true when no CLASSPULSE_DEMO_PASSWORD was set
+
+
+@dataclass(frozen=True)
+class DemoAccount:
+    email: str
+    role: str  # "student" or "teacher"
+    name: str
 
 
 def wipe(backend: Backend) -> dict[str, int]:
@@ -84,8 +108,14 @@ def seed(
     config: SimulatorConfig,
     now: datetime | None = None,
     progress: Callable[[str], None] = lambda message: None,
+    demo_password: str | None = None,
 ) -> SeedReport:
-    """Wipe the old simulation, then generate and send a new one ending at `now` (default: now)."""
+    """Wipe the old simulation, then generate and send a new one ending at `now` (default: now).
+
+    Every simulated student and teacher also gets a simulated account (an email on classpulse.test).
+    They share one password: `demo_password`, else CLASSPULSE_DEMO_PASSWORD, else a random one made
+    for this run (returned in the report; the caller shows it once).
+    """
     started = time.monotonic()
     moment = (now or datetime.now(UTC)).astimezone(UTC)
 
@@ -128,6 +158,10 @@ def seed(
         json={"effects": true_effects(config), "weeks": config.weeks, "seed": config.seed},
     )
     progress(f"Registered {len(students)} students and the true effects")
+    chosen = demo_password or configured_demo_password()
+    password = chosen or secrets.token_urlsafe(12)
+    demo_accounts = create_accounts(backend, students, password)
+    progress(f"Created {len(demo_accounts)} simulated accounts")
 
     lectures = lecture_schedule(config, tz, moment)
     sent = 0
@@ -149,7 +183,46 @@ def seed(
         seconds=time.monotonic() - started,
         tests=tests,
         marks=marks,
+        accounts=tuple(demo_accounts),
+        demo_password=password,
+        password_generated=not chosen,
     )
+
+
+def create_accounts(backend: Backend, students: list[SimStudent], password: str) -> list[DemoAccount]:
+    """One simulated account for each simulated teacher and each simulated student."""
+    made: list[DemoAccount] = []
+    for teacher in backend.call("GET", "/api/teachers"):
+        if not teacher["simulated"]:
+            continue
+        email = staff_email(teacher["name"])
+        backend.call(
+            "POST",
+            "/api/accounts",
+            json={
+                "email": email,
+                "password": password,
+                "role": "teacher",
+                "teacher_id": teacher["id"],
+                "simulated": True,
+            },
+        )
+        made.append(DemoAccount(email, "teacher", teacher["name"]))
+    for s in students:
+        email = student_email(s.register_no)
+        backend.call(
+            "POST",
+            "/api/accounts",
+            json={
+                "email": email,
+                "password": password,
+                "role": "student",
+                "student_register_no": s.register_no,
+                "simulated": True,
+            },
+        )
+        made.append(DemoAccount(email, "student", f"{s.name} ({s.register_no})"))
+    return made
 
 
 def upload_marks(

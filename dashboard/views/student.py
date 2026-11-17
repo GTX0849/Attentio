@@ -19,7 +19,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from dashboard import api
+from dashboard import api, session
 from dashboard.api import BackendError, get_live
 from dashboard.api import get_student_current as get_current
 from dashboard.api import get_student_profile as get_profile
@@ -36,14 +36,12 @@ from dashboard.theme import (
 )
 from shared.config import Config, load_config
 
-DEFAULT_REGISTER_NO = "STU001"
-REGISTER_NO_KEY = "student_register_no"  # set by the sidebar's register number input
 LIVE_MINUTES = 15  # span of the lead chart
 REFRESH_SECONDS = load_config().dashboard_refresh_seconds
 PROFILE_REFRESH_SECONDS = 60  # semester figures change slowly
 TITLE = "Your attention, live"
 NO_DATA = "—"
-EMPTY_LECTURES = "No lectures yet — upload a timetable or start a session in the Admin view"
+EMPTY_LECTURES = "No lectures yet — they appear once the department has uploaded the timetable"
 NO_MARKS = "No marks yet"
 REASONS = {
     "low_presence": "Not enough time in view",
@@ -53,10 +51,14 @@ REASONS = {
 
 
 def render(config: Config) -> None:
-    register_no = str(st.session_state.get(REGISTER_NO_KEY, DEFAULT_REGISTER_NO)).strip()
+    """The signed-in student's own view. The register number comes from the account, never from a picker."""
+    identity = session.current()
+    register_no = (identity.student_register_no or "").strip() if identity else ""
+    if not register_no:
+        st.error("This account is not linked to a student")
+        return
     live_view(config, register_no)
-    if register_no:
-        semester_view(config, register_no)
+    semester_view(config, register_no)
 
 
 # ---- wording and frames (no Streamlit calls) -------------------------------------
@@ -352,6 +354,7 @@ def attendance_frame(rows: list[dict[str, Any]], tz: ZoneInfo) -> pd.DataFrame:
 
 
 @st.fragment(run_every=REFRESH_SECONDS)
+@session.ends_on_expiry
 def live_view(config: Config, register_no: str) -> None:
     """Header, stat cards and the last 15 minutes. Reruns on its own timer."""
     eyebrow = f"Student · {register_no}" if register_no else "Student"
@@ -410,6 +413,7 @@ def live_view(config: Config, register_no: str) -> None:
 
 
 @st.fragment(run_every=PROFILE_REFRESH_SECONDS)
+@session.ends_on_expiry
 def semester_view(config: Config, register_no: str) -> None:
     """Breakdowns over the whole semester and the attendance list."""
     try:

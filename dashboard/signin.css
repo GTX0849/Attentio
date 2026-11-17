@@ -1,0 +1,164 @@
+/* The sign-in page (dashboard/signin.py). Colours and sizes follow the "Sign In Desktop" design. */
+
+/* Full-bleed split page: no header bar, no page padding, no gap between the two columns. */
+[data-testid="stHeader"] { display: none; }
+[data-testid="stMainBlockContainer"] {
+  padding: 0 !important;
+  max-width: none !important;
+}
+[data-testid="stMainBlockContainer"] [data-testid="stHorizontalBlock"] { gap: 0; }
+
+/* ---- left: brand panel ---- */
+.st-key-signin_left {
+  background: #F3F4F1;
+  border-right: 1px solid #DFE2DD;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+.st-key-signin_left [data-testid="stHtml"],
+.st-key-signin_left [data-testid="stElementContainer"] { height: 100%; }
+.cp-left {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 48px;
+}
+.cp-brand { display: flex; align-items: center; gap: 10px; }
+.cp-brand span { font-size: 20px; font-weight: 600; letter-spacing: -0.5px; color: #18212B; }
+.cp-mark {
+  width: 32px;
+  height: 32px;
+  background: #1B5FD0;
+  border-radius: 7px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 3px;
+  padding-bottom: 7px;
+  box-sizing: border-box;
+}
+.cp-mark span { display: block; width: 3px; background: #fff; border-radius: 1px; }
+.cp-message { display: flex; flex-direction: column; gap: 14px; }
+.cp-eyebrow {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: #525C66;
+}
+.cp-headline {
+  max-width: 500px;
+  margin: 0;
+  padding: 0;
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -1px;
+  color: #18212B;
+}
+.cp-supporting { max-width: 480px; margin: 0; font-size: 16px; line-height: 1.55; color: #525C66; }
+
+.cp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #DFE2DD;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(24, 33, 43, 0.05), 0 8px 24px rgba(24, 33, 43, 0.06);
+}
+.cp-card-head { display: flex; justify-content: space-between; align-items: center; }
+.cp-card-title { font-size: 14px; font-weight: 600; color: #18212B; }
+.cp-card-sub { font-size: 13px; color: #525C66; margin-top: 2px; }
+.cp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border: 1px solid #DFE2DD;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #18212B;
+}
+.cp-pill i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+.cp-cols {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  width: 100%;
+  border-bottom: 1px solid #DFE2DD;
+}
+.cp-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; }
+.cp-legend { display: flex; align-items: center; gap: 16px; font-size: 12px; color: #525C66; }
+.cp-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.cp-legend-item i { width: 10px; height: 10px; border-radius: 2px; display: block; }
+
+.cp-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 500px;
+  margin-top: auto;
+  font-size: 13px;
+  color: #525C66;
+}
+.cp-lock {
+  /* the lock icon as a background: st.html strips inline svg */
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  display: block;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23525C66' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='11' width='18' height='11' rx='2' ry='2'/%3E%3Cpath d='M7 11V7a5 5 0 0 1 10 0v4'/%3E%3C/svg%3E") center / 18px 18px no-repeat;
+}
+
+/* ---- right: the form ---- */
+.st-key-signin_right {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.st-key-signin_form_box { width: 400px; max-width: 100%; gap: 1.75rem; }
+.cp-form-head h2 {
+  margin: 0;
+  padding: 0;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.75px;
+  color: #18212B;
+}
+.cp-form-head p { margin: 8px 0 0; font-size: 14px; color: #525C66; }
+
+.st-key-signin_form_box label p { font-size: 13px; font-weight: 500; color: #18212B; }
+.st-key-signin_form_box [data-testid="stTextInputRootElement"] {
+  height: 44px;
+  background: #fff;
+  border: 1px solid #DFE2DD;
+  border-radius: 8px;
+}
+.st-key-signin_form_box [data-testid="stTextInputRootElement"]:focus-within { border-color: #1B5FD0; }
+.st-key-signin_form_box [data-testid="stTextInputRootElement"] input { height: 100%; font-size: 15px; }
+.st-key-signin_form_box button[kind="primaryFormSubmit"],
+.st-key-signin_form_box [data-testid="stFormSubmitButton"] button {
+  height: 46px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.cp-forgot { font-size: 13px; margin-top: -0.5rem; }
+.cp-note { padding-top: 20px; margin-top: 28px; display: flex; flex-direction: column; gap: 4px; }
+.cp-note-title { font-size: 13px; font-weight: 500; color: #18212B; }
+.cp-note-text { font-size: 13px; color: #525C66; }

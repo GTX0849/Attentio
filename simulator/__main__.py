@@ -4,9 +4,10 @@ import argparse
 import dataclasses
 import sys
 
-from shared.config import load_config
+from shared.config import load_config, service_key
 from simulator.client import Backend, SimulatorError, TimeoutSession, seed, wipe
 from simulator.config import load_simulator_config
+from simulator.credentials import write_credentials
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    backend = Backend(TimeoutSession(), args.backend_url or load_config().backend_url)
+    backend = Backend(TimeoutSession(), args.backend_url or load_config().backend_url, service_key())
     try:
         if args.command == "wipe":
             removed = wipe(backend)
@@ -50,6 +51,12 @@ def main(argv: list[str] | None = None) -> int:
         f"Done in {report.seconds:.0f} s: {report.students} students, "
         f"{report.lectures} lectures, {report.records} records, {report.tests} tests with {report.marks} marks"
     )
+    path = write_credentials(report.accounts, report.demo_password, report.password_generated)
+    print(f"Created {len(report.accounts)} simulated accounts. Emails are listed in {path}")
+    if report.password_generated:
+        print(f"Their password, shown only now and also saved in that file: {report.demo_password}")
+    else:
+        print("Their password is the value of CLASSPULSE_DEMO_PASSWORD")
     return 0
 
 

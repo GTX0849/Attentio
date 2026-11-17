@@ -211,3 +211,39 @@ class SimulationEffect(Base):
     kind: Mapped[str]
     key: Mapped[str]
     value: Mapped[float] = mapped_column(Float)
+
+
+class Account(Base):
+    """A sign-in, identified by email. Students link to a student, teachers to a teacher; admins link to nothing.
+
+    The email is stored lower-cased, so it is unique ignoring case. `password_hash` is a salted scrypt
+    hash, never the password. Simulated accounts are removed with the rest of the simulation.
+    """
+
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(unique=True)
+    role: Mapped[str]  # "student", "teacher" or "admin"
+    password_hash: Mapped[str]
+    student_register_no: Mapped[str | None] = mapped_column(
+        ForeignKey("students.register_no", ondelete="CASCADE"), default=None
+    )
+    teacher_id: Mapped[int | None] = mapped_column(
+        ForeignKey("teachers.id", ondelete="CASCADE"), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    simulated: Mapped[bool] = _simulated_flag()
+
+
+class LoginSession(Base):
+    """A signed-in session. Only the SHA-256 of the token is stored; it stops working at `expires_at`."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(default=False, server_default=text("false"))

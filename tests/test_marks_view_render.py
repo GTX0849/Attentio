@@ -91,11 +91,7 @@ def marks_data(teacher_data: dict[str, list[Any]], monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(api, "get_marks_groups", get_groups)
     monkeypatch.setattr(api, "list_subjects", lambda url: [{"id": 5, "name": "Data Structures"}, {"id": 6, "name": "Physics"}])
-    monkeypatch.setattr(
-        api,
-        "get_timetable",
-        lambda url: {"timezone": "Asia/Kolkata", "slots": [{"teacher": "Dr. Meera Iyer", "subject": "Data Structures"}]},
-    )
+    monkeypatch.setattr(api, "list_teacher_subjects", lambda url, teacher_id: [{"id": 5, "name": "Data Structures"}])
 
     def upload(url: str, teacher_id: int, subject_id: int, test_date: date, name: str, filename: str, content: bytes) -> dict[str, Any]:
         asked["upload"].append((teacher_id, subject_id, test_date, name, filename, content))
@@ -325,7 +321,7 @@ def test_the_admin_marks_column_shows_each_teachers_figure(
     assert admin_figures.MARKS_NOTE in [c.value for c in at.caption]
     assert "who sat each test" in admin_figures.MARKS_NOTE
     assert admin_figures.NO_MARKS not in [c.value for c in at.caption]
-    assert "STU001" not in page and len(at.dataframe) == 2  # still no student on the view
+    assert "STU001" not in page and len(at.dataframe) == 3  # still no student on the view (the third is the accounts)
 
 
 def test_the_admin_view_says_no_marks_yet_when_nobody_has_uploaded_any(

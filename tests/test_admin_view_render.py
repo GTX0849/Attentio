@@ -76,9 +76,7 @@ def table_of(page: str) -> str:
 
 
 def admin_page() -> tuple[Any, str]:
-    at = run_app()
-    at.session_state["role"] = "Admin"
-    at.run()
+    at = run_app("admin")
     assert not at.exception
     return at, html_of(at)
 
@@ -105,7 +103,7 @@ def test_the_banner_and_header_come_first_and_the_timetable_stays_below(simulate
     assert "Listed alphabetically, not ranked · figures hidden below 5 lectures" in page
     assert page.index("Teacher feedback, all teachers") < page.index("Timetable and sessions")
     assert page.index("Attention figures with 95% ranges") < page.index("Timetable and sessions")
-    assert [s.value for s in at.subheader] == ["Weekly timetable", "Manual sessions", "Recent lectures"]
+    assert [s.value for s in at.subheader] == ["Weekly timetable", "Manual sessions", "Recent lectures", "Accounts"]
 
 
 def test_the_figures_table_lists_teachers_as_given_with_range_bars_and_built_in_values(
@@ -169,7 +167,7 @@ def test_the_page_says_it_is_feedback_and_names_the_slot_limit(simulated: dict[s
 def test_no_student_attention_appears_on_the_view(simulated: dict[str, list[Any]]) -> None:
     at, page = admin_page()
     assert "STU001" not in page and "SIM-A01" not in page
-    assert len(at.dataframe) == 2  # only the weekly timetable and the recent lectures
+    assert len(at.dataframe) == 3  # the weekly timetable, the recent lectures and the accounts (emails only)
 
 
 def test_the_copy_has_no_exclamation_marks_emoji_or_final_periods_on_labels(
@@ -248,4 +246,4 @@ def test_an_unreachable_overview_shows_an_error_and_still_the_timetable(
     at, page = admin_page()
     assert any("Cannot reach the backend" in e.value for e in at.error)
     assert "Teacher feedback, all teachers" in page
-    assert [s.value for s in at.subheader] == ["Weekly timetable", "Manual sessions", "Recent lectures"]
+    assert [s.value for s in at.subheader] == ["Weekly timetable", "Manual sessions", "Recent lectures", "Accounts"]

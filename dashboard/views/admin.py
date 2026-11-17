@@ -6,6 +6,9 @@ markup are in `dashboard/admin_figures.py`. It holds totals per teacher and per 
 figure for an individual student. The three timetable sections below it are separate functions
 and share only the data passed to them.
 
+The Accounts section (`accounts_section`) at the bottom is where an admin creates sign-ins, lists them
+(by email, never with a password) and resets a password.
+
 The sidebar holds the controls (`sidebar_controls`): the timetable file picker
 and the manual-session pickers. The main area holds what they act on: the
 preview, the result messages, the tables and the Stop buttons.
@@ -31,6 +34,15 @@ SESSION_NOTICE_KEY = "session_notice"  # (kind, text)
 PREVIEW_ROWS = 20
 LECTURE_ROWS = 15
 SOURCE_LABELS = {"timetable": "Timetable", "manual": "Manual session"}
+
+ACCOUNT_NOTICE_KEY = "account_notice"  # (kind, text)
+ACCOUNT_ROLE_KEY = "account_role"
+ACCOUNT_LINK_KEY = "account_link"
+ACCOUNT_EMAIL_KEY = "account_email"
+ACCOUNT_PASSWORD_KEY = "account_password"
+RESET_ACCOUNT_KEY = "reset_account"
+RESET_PASSWORD_KEY = "reset_password"
+ACCOUNT_ROLES = {"student": "Student", "teacher": "Teacher", "admin": "Admin"}
 
 
 # ---- sidebar ---------------------------------------------------------------------
@@ -153,6 +165,7 @@ def render(config: Config) -> None:
     timetable_section(config, timetable)
     sessions_section(config, tz)
     lectures_section(config, tz)
+    accounts_section(config)
 
 
 def _simulation(config: Config) -> dict[str, Any] | None:
@@ -329,3 +342,129 @@ def lectures_section(config: Config, tz: ZoneInfo) -> None:
 def _local(timestamp: str, tz: ZoneInfo, fmt: str) -> str:
     """An API timestamp (UTC, ISO 8601) shown in the timetable's time zone."""
     return datetime.fromisoformat(timestamp).astimezone(tz).strftime(fmt)
+
+
+# ---- accounts --------------------------------------------------------------------------------------------
+
+
+def accounts_frame(accounts: list[dict[str, Any]]) -> pd.DataFrame:
+    """The accounts as shown: email, role, what it links to and the date it was made. No passwords."""
+    return pd.DataFrame(
+        {
+            "Email": [a["email"] for a in accounts],
+            "Role": [ACCOUNT_ROLES.get(a["role"], a["role"]) for a in accounts],
+            "Linked to": [a["linked_name"] or "" for a in accounts],
+            "Created": [a["created_at"][:10] for a in accounts],
+            "Demo": ["Simulated" if a["simulated"] else "" for a in accounts],
+        }
+    )
+
+
+def _account_notice() -> None:
+    notice = st.session_state.pop(ACCOUNT_NOTICE_KEY, None)
+    if notice is not None:
+        kind, text = notice
+        (st.success if kind == "success" else st.error)(text)
+
+
+def _create_account(backend_url: str, link_ids: dict[str, str | int]) -> None:
+    """Form callback: runs before the page reruns, so the page shows the outcome."""
+    state = st.session_state
+    role = str(state.get(ACCOUNT_ROLE_KEY) or "student")
+    email = str(state.get(ACCOUNT_EMAIL_KEY) or "").strip()
+    link = link_ids.get(str(state.get(ACCOUNT_LINK_KEY)))
+    try:
+        made = api.create_account(
+            backend_url,
+            email,
+            str(state.get(ACCOUNT_PASSWORD_KEY) or ""),
+            role,
+            str(link) if role == "student" and link is not None else None,
+            int(link) if role == "teacher" and link is not None else None,
+        )
+        state[ACCOUNT_NOTICE_KEY] = ("success", f"Account created for {made['email']}")
+    except BackendError as e:
+        state[ACCOUNT_NOTICE_KEY] = ("error", str(e))
+
+
+def _reset_password(backend_url: str, account_ids: dict[str, int]) -> None:
+    state = st.session_state
+    chosen = state.get(RESET_ACCOUNT_KEY)
+    if chosen is None:
+        state[ACCOUNT_NOTICE_KEY] = ("error", "Choose an account")
+        return
+    try:
+        api.reset_account_password(backend_url, account_ids[chosen], str(state.get(RESET_PASSWORD_KEY) or ""))
+        state[ACCOUNT_NOTICE_KEY] = ("success", f"New password set for {chosen}. Its open sign-ins have ended")
+    except BackendError as e:
+        state[ACCOUNT_NOTICE_KEY] = ("error", str(e))
+
+
+def accounts_section(config: Config) -> None:
+    """List the accounts, create one (email, role and link) and reset a password."""
+    with st.container(border=True):
+        st.subheader("Accounts")
+        st.caption("People sign in with their email. Passwords are never shown, only set.")
+        _account_notice()
+        try:
+            accounts = api.list_accounts(config.backend_url)
+            students = api.list_students(config.backend_url)
+            teachers = api.list_teachers(config.backend_url)
+        except BackendError as e:
+            st.error(str(e))
+            return
+        if accounts:
+            st.dataframe(accounts_frame(accounts), hide_index=True, alt="Accounts by email, role and link")
+        else:
+            st.info("No accounts yet. Create the first one below")
+
+        linked_students = {a["student_register_no"] for a in accounts if a["student_register_no"]}
+        linked_teachers = {a["teacher_id"] for a in accounts if a["teacher_id"] is not None}
+        with st.expander("Create an account"):
+            role = st.segmented_control(
+                "Role",
+                list(ACCOUNT_ROLES),
+                format_func=lambda r: ACCOUNT_ROLES[r],
+                default="student",
+                key=ACCOUNT_ROLE_KEY,
+            ) or "student"
+            link_ids: dict[str, str | int] = {}
+            if role == "student":
+                for s in students:
+                    if s["register_no"] not in linked_students:
+                        label = " · ".join(str(p) for p in (s["register_no"], s.get("name")) if p)
+                        link_ids[label] = s["register_no"]
+            elif role == "teacher":
+                for t in teachers:
+                    if t["id"] not in linked_teachers:
+                        link_ids[t["name"]] = t["id"]
+            with st.form("account_create", clear_on_submit=True, border=False):
+                st.text_input("Email", key=ACCOUNT_EMAIL_KEY)
+                if role != "admin":
+                    st.selectbox(
+                        "Student" if role == "student" else "Teacher",
+                        list(link_ids),
+                        index=None,
+                        placeholder="Select a student" if role == "student" else "Select a teacher",
+                        key=ACCOUNT_LINK_KEY,
+                    )
+                st.text_input("Initial password", type="password", key=ACCOUNT_PASSWORD_KEY)
+                st.form_submit_button(
+                    "Create account",
+                    type="primary",
+                    on_click=_create_account,
+                    args=(config.backend_url, link_ids),
+                )
+
+        with st.expander("Reset a password"):
+            account_ids = {a["email"]: a["id"] for a in accounts}
+            with st.form("account_reset", clear_on_submit=True, border=False):
+                st.selectbox(
+                    "Account", list(account_ids), index=None, placeholder="Select an account", key=RESET_ACCOUNT_KEY
+                )
+                st.text_input("New password", type="password", key=RESET_PASSWORD_KEY)
+                st.form_submit_button(
+                    "Set new password",
+                    on_click=_reset_password,
+                    args=(config.backend_url, account_ids),
+                )

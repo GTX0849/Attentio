@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from dashboard import api, theme
+from dashboard import api, session, theme
 from dashboard.views import student
 
 APP = str(Path(__file__).resolve().parent.parent / "dashboard" / "app.py")
@@ -185,7 +185,7 @@ EMPTY_OVERVIEW = {
 @pytest.fixture
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Replace the dashboard's HTTP calls; the returned dict records what was sent."""
-    calls: dict[str, list[Any]] = {"upload": [], "start": [], "stop": [], "marks": []}
+    calls: dict[str, list[Any]] = {"upload": [], "start": [], "stop": [], "marks": [], "logout": [], "accounts": []}
     open_sessions: list[dict[str, Any]] = [LECTURE]
 
     monkeypatch.setattr(api, "get_timetable", lambda url: {"timezone": "Asia/Kolkata", "slots": [SLOT]})
@@ -219,6 +219,15 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         open_sessions.clear()
         return {**LECTURE, "open": False}
 
+    monkeypatch.setattr(api, "logout", lambda url: calls["logout"].append(url))
+    monkeypatch.setattr(api, "list_accounts", lambda url: list(ACCOUNTS))
+    monkeypatch.setattr(api, "list_teacher_subjects", lambda url, teacher_id: [{"id": 1, "name": "Mathematics"}])
+
+    def create_account(url: str, email: str, password: str, role: str, register_no: str | None, teacher_id: int | None) -> dict[str, Any]:
+        calls["accounts"].append((email, role, register_no, teacher_id))
+        return {"email": email.lower()}
+
+    monkeypatch.setattr(api, "create_account", create_account)
     monkeypatch.setattr(api, "get_admin_overview", lambda url: EMPTY_OVERVIEW)
     monkeypatch.setattr(api, "get_teacher_feedback", lambda url, teacher_id: NO_TEACHER_FEEDBACK)
     monkeypatch.setattr(api, "get_lecture_timeline", lambda url, lecture_id: {"points": []})
@@ -246,8 +255,67 @@ def window(lecture: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def run_app() -> AppTest:
-    return AppTest.from_file(APP, default_timeout=20).run()
+ACCOUNTS = [
+    {
+        "id": 1,
+        "email": "admin@example.edu",
+        "role": "admin",
+        "student_register_no": None,
+        "teacher_id": None,
+        "linked_name": None,
+        "created_at": "2026-03-01T09:00:00Z",
+        "simulated": False,
+    },
+    {
+        "id": 2,
+        "email": "rao@example.edu",
+        "role": "teacher",
+        "student_register_no": None,
+        "teacher_id": 1,
+        "linked_name": "Dr Rao",
+        "created_at": "2026-03-01T09:05:00Z",
+        "simulated": False,
+    },
+]
+# The signed-in identity each role starts from (the sign-in itself is tested in test_signin_render.py).
+IDENTITIES: dict[str, dict[str, Any]] = {
+    "student": {
+        "token": "t-student",
+        "role": "student",
+        "email": "asha@example.edu",
+        "display_name": "Demo Student",
+        "student_register_no": "STU001",
+        "teacher_id": None,
+    },
+    "teacher": {
+        "token": "t-teacher",
+        "role": "teacher",
+        "email": "rao@example.edu",
+        "display_name": "Dr Rao",
+        "student_register_no": None,
+        "teacher_id": 1,
+    },
+    "admin": {
+        "token": "t-admin",
+        "role": "admin",
+        "email": "admin@example.edu",
+        "display_name": "admin@example.edu",
+        "student_register_no": None,
+        "teacher_id": None,
+    },
+}
+
+
+def signed_in(role: str = "student", **identity: Any) -> AppTest:
+    """The app before its first run, already signed in as `role` (override identity fields by name)."""
+    at = AppTest.from_file(APP, default_timeout=20)
+    at.session_state[session.AUTH_KEY] = {**IDENTITIES[role], **identity}
+    return at
+
+
+def run_app(role: str = "student", **identity: Any) -> AppTest:
+    """Run the app signed in as `role` (student by default), landing in that role's view."""
+    return signed_in(role, **identity).run()
 
 
 def html_of(at: AppTest) -> str:
@@ -359,34 +427,34 @@ def test_student_helpers_word_the_cards_from_the_api_figures() -> None:
     assert student.attendance_card(CURRENT) == ("17 of 19", "Present at 50% in view or more")
 
 
-def test_sidebar_has_the_role_switcher_and_the_states_legend(
-    fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
+def test_the_sidebar_shows_who_is_signed_in_a_sign_out_button_and_the_states_legend_but_no_role_switcher(
+    fake_backend: dict[str, list[Any]],
 ) -> None:
-    at = run_app()
-    assert at.session_state["role"] == "Student"
-    page = html_of(at)
-    for name, description in theme.STATE_DESCRIPTIONS.items():
-        assert name in page and description in page
-    assert at.sidebar.selectbox(key="student_register_no").value == "STU001"
+    for role, label, name in (("student", "Student", "Demo Student"), ("teacher", "Teacher", "Dr Rao"), ("admin", "Admin", "admin@example.edu")):
+        at = run_app(role)
+        assert not at.exception
+        sidebar = " ".join(str(el.proto.body) for el in at.sidebar.get("html"))
+        assert label in sidebar and name in sidebar
+        assert [b.label for b in at.sidebar.button if b.key == "sign_out"] == ["Sign out"]
+        for state, description in theme.STATE_DESCRIPTIONS.items():
+            assert state in sidebar and description in sidebar
+        assert not at.sidebar.get("button_group")  # no segmented "View as" control
+        assert "role" not in at.session_state
 
 
 def test_admin_view_shows_timetable_sessions_and_lectures(
     fake_backend: dict[str, list[Any]],
 ) -> None:
-    at = run_app()
-    at.session_state["role"] = "Admin"
-    at.run()
+    at = run_app("admin")
     assert not at.exception
     assert "Timetable and sessions" in html_of(at)
-    assert [s.value for s in at.subheader] == ["Weekly timetable", "Manual sessions", "Recent lectures"]
-    assert len(at.dataframe) == 2  # the weekly timetable and the recent lectures
+    assert [s.value for s in at.subheader] == ["Weekly timetable", "Manual sessions", "Recent lectures", "Accounts"]
+    assert len(at.dataframe) == 3  # the weekly timetable, the recent lectures and the accounts
     assert any("R101" in m.value and "Mathematics" in m.value for m in at.markdown)
 
 
 def test_admin_can_start_and_stop_a_session(fake_backend: dict[str, list[Any]]) -> None:
-    at = run_app()
-    at.session_state["role"] = "Admin"
-    at.run()
+    at = run_app("admin")
     assert at.sidebar.button(key="session_start").disabled  # nothing chosen yet
 
     at.sidebar.selectbox(key="session_room").select("R101")
@@ -405,9 +473,7 @@ def test_admin_can_start_and_stop_a_session(fake_backend: dict[str, list[Any]]) 
 def test_admin_upload_shows_a_preview_and_reports_bad_rows(
     fake_backend: dict[str, list[Any]],
 ) -> None:
-    at = run_app()
-    at.session_state["role"] = "Admin"
-    at.run()
+    at = run_app("admin")
     csv_bytes = b"day,start,end,room,section,subject,teacher\nFunday,10:00,10:50,R101,CSE-A,Physics,Dr Iyer\n"
     at.sidebar.file_uploader(key="timetable_file").upload("t.csv", csv_bytes).run()
     assert not at.exception
@@ -418,14 +484,12 @@ def test_admin_upload_shows_a_preview_and_reports_bad_rows(
     assert any("Nothing was changed. 1 rows need fixing" in e.value for e in at.error)
 
 
-def test_teacher_view_renders_with_a_teacher_select(fake_backend: dict[str, list[Any]]) -> None:
-    at = run_app()
-    at.session_state["role"] = "Teacher"
-    at.run()
+def test_teacher_view_is_the_signed_in_teachers_own_with_no_picker(fake_backend: dict[str, list[Any]]) -> None:
+    at = run_app("teacher")
     assert not at.exception
     page = html_of(at)
     assert "Teacher · Dr Rao" in page and "Feedback on your lectures" in page
-    assert at.sidebar.selectbox(key="teacher_name").value == "Dr Rao"
+    assert [s.key for s in at.sidebar.selectbox if s.key == "teacher_name"] == []
 
 
 def test_theme_helpers_use_the_design_colours_and_escape_text() -> None:
@@ -455,17 +519,27 @@ def test_the_banner_names_the_cohort_from_the_simulation_endpoint() -> None:
     assert banner_text(None) == FALLBACK
 
 
-def test_the_student_sidebar_offers_live_and_simulated_students_and_any_typed_number(
+def test_the_student_view_is_the_signed_in_students_own_with_no_picker(
     fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(api, "list_students", lambda url: [STUDENT, SIM_STUDENT])
-    at = run_app()
-    box = at.sidebar.selectbox(key="student_register_no")
-    assert box.options == ["STU001 · Demo Student", "SIM-A01 · Aarav Sharma · SIM-A"]
-    assert box.value == "STU001"
-    box.select("SIM-A01").run()
+    asked: list[str] = []
+    monkeypatch.setattr(api, "list_students", lambda url: pytest.fail("a student never lists students"))
+    def get_current(url: str, reg: str) -> dict[str, Any]:
+        asked.append(reg)
+        return NO_CURRENT
+
+    monkeypatch.setattr(student, "get_current", get_current)
+    at = run_app("student", student_register_no="SIM-A01")
     assert not at.exception
     assert "Student · SIM-A01" in html_of(at)
+    assert not list(at.sidebar.selectbox)  # no register number picker
+    assert asked and set(asked) == {"SIM-A01"}
+
+
+def test_a_student_account_without_a_link_says_so(fake_backend: dict[str, list[Any]]) -> None:
+    at = run_app("student", student_register_no=None)
+    assert not at.exception
+    assert any("not linked to a student" in e.value for e in at.error)
 
 
 def test_a_simulated_student_shows_the_banner_and_a_live_one_does_not(
@@ -474,8 +548,7 @@ def test_a_simulated_student_shows_the_banner_and_a_live_one_does_not(
     monkeypatch.setattr(api, "get_simulation", lambda url: SIMULATION)
     monkeypatch.setattr(api, "list_students", lambda url: [STUDENT, SIM_STUDENT])
     fake_student(monkeypatch, {**CURRENT, "simulated": True}, PROFILE, [window(DS_LECTURE)])
-    at = run_app()
-    at.sidebar.selectbox(key="student_register_no").select("SIM-A01").run()
+    at = run_app("student", student_register_no="SIM-A01")
     assert not at.exception
     page = html_of(at)
     assert BANNER in page
@@ -489,15 +562,11 @@ def test_a_simulated_student_shows_the_banner_and_a_live_one_does_not(
 def test_the_admin_view_shows_the_banner_while_a_simulation_is_loaded(
     fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    at = run_app()
-    at.session_state["role"] = "Admin"
-    at.run()
+    at = run_app("admin")
     assert "Simulated data" not in html_of(at)
 
     monkeypatch.setattr(api, "get_simulation", lambda url: SIMULATION)
-    at = run_app()
-    at.session_state["role"] = "Admin"
-    at.run()
+    at = run_app("admin")
     assert BANNER in html_of(at)
 
 
@@ -506,17 +575,9 @@ def test_the_teacher_view_shows_the_banner_for_a_simulated_teacher(
 ) -> None:
     monkeypatch.setattr(api, "get_simulation", lambda url: SIMULATION)
     monkeypatch.setattr(
-        api, "list_teachers", lambda url: [{"id": 1, "name": "Dr Rao"}, {"id": 2, "name": "Dr Sim", "simulated": True}]
-    )
-    monkeypatch.setattr(
         api,
         "get_teacher_feedback",
         lambda url, teacher_id: {**NO_TEACHER_FEEDBACK, "teacher_id": teacher_id, "simulated": teacher_id == 2},
     )
-    at = run_app()
-    at.session_state["role"] = "Teacher"
-    at.run()
-    at.sidebar.selectbox(key="teacher_name").select("Dr Rao").run()
-    assert "Simulated data" not in html_of(at)
-    at.sidebar.selectbox(key="teacher_name").select("Dr Sim").run()
-    assert BANNER in html_of(at)
+    assert "Simulated data" not in html_of(run_app("teacher", teacher_id=1))
+    assert BANNER in html_of(run_app("teacher", teacher_id=2, display_name="Dr Sim"))

@@ -1,6 +1,6 @@
 # ClassPulse
 
-A laptop webcam worker classifies the person in view into attention states and sends one record per student per 30-second window to a FastAPI backend (PostgreSQL). A Streamlit dashboard reads only from the backend over HTTP.
+A laptop webcam worker classifies the person in view into attention states and sends one record per student per 30-second window to a FastAPI backend (PostgreSQL). A Streamlit dashboard reads only from the backend over HTTP. People sign in with an email and a password, and the backend decides what each role may read (see Signing in).
 
 The worker decides states with the rules in the `states:` section of `config/classpulse.yaml` (eyes-closed grace, look-down allowance, pitch and yaw bands). It feeds those rules with real readings from MediaPipe (head pitch and yaw, eyes closed, shoulders in view); see Real readings below.
 
@@ -11,7 +11,7 @@ The worker decides states with the rules in the `states:` section of `config/cla
 | `shared/` | Config loader (`config.py`) and the attention record schema (`schema.py`) used by worker and backend |
 | `worker/` | Webcam capture, window aggregation, spool and retry |
 | `backend/` | FastAPI app, SQLAlchemy models, timetable and lecture logic, seeding |
-| `dashboard/` | Streamlit app; one module per role in `dashboard/views/`, shared look in `dashboard/theme.py` |
+| `dashboard/` | Streamlit app; the sign-in page (`signin.py`), one module per role in `dashboard/views/`, shared look in `dashboard/theme.py` |
 | `.streamlit/` | Streamlit theme (colours and IBM Plex fonts) |
 | `samples/` | `timetable.csv`, a sample weekly timetable, and `marks.csv`, a sample marks file for the simulated cohort, for the demo |
 | `simulator/` | Simulated classroom history: cohort, timetable and records generated and sent through the backend API (see Simulator) |
@@ -36,7 +36,17 @@ DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/classpul
 TEST_DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/classpulse_test
 ```
 
+Also put a long random value in `.env` as `CLASSPULSE_SERVICE_KEY` (used by the worker and the simulator, see Signing in), for example the output of `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+
 You do not need to create the databases. When the backend (or the tests) start, a missing database is created by connecting to the server's `postgres` database with the same credentials. Tables are created automatically and the demo data is seeded: room `R101`, camera `CAM1`, student `STU001`. `.env` is git-ignored; never commit it.
+
+Nobody can sign in until an account exists. After the backend has run once (or right away: the command creates the tables too), make the first admin:
+
+```powershell
+python -m backend.accounts create --role admin --email admin@yourschool.edu
+```
+
+It asks for the password twice. The rest of the accounts are in Signing in.
 
 ## Run
 
@@ -50,13 +60,13 @@ python -m backend
 
 Equivalent: `python -m uvicorn backend.main:create_app --factory --host 127.0.0.1 --port 8000`. API docs are at http://127.0.0.1:8000/docs.
 
-**Dashboard:**
+**Dashboard** (open it and sign in with the account you made; there is no other page before that):
 
 ```powershell
 streamlit run dashboard/app.py
 ```
 
-**Worker** (needs a webcam; press `q` in the preview window or Ctrl+C to stop):
+**Worker** (needs a webcam and `CLASSPULSE_SERVICE_KEY` in `.env`, the same value the backend reads; press `q` in the preview window or Ctrl+C to stop):
 
 ```powershell
 python -m worker --student STU001 --camera CAM1
@@ -67,6 +77,41 @@ Options: `--no-preview` (no window, stop with Ctrl+C), `--camera-index N`, `--sp
 The worker runs four things at once: a capture thread reads the camera continuously, the preview shows every frame live (about 30 fps) with the latest state drawn on it, scoring samples the newest frame at `worker.target_fps` (10), and finished windows are sent in the background. A slow or stopped backend therefore never freezes the preview; unsent windows wait in the spool and are retried every 5 seconds.
 
 If a window cannot be sent (for example the backend is stopped), the worker appends it to `.spool/unsent.jsonl` and resends everything spooled with the next window and at start-up. Stopping and restarting the backend loses nothing.
+
+## Signing in
+
+One sign-in page serves everyone: an email and a password. The role (student, teacher or admin) comes from the account, and the person lands in their own view. The role is checked by the backend on every request, not only by the dashboard, so another front end would get the same limits.
+
+**Accounts.** An account has an email (stored lower-cased, unique ignoring case), a role, a password and a link: a student account to one register number, a teacher account to one teacher (the names the timetable upload created), an admin account to nothing. Passwords are hashed with scrypt and a random salt per account (standard library only) and compared in constant time; there is no password in the database, the logs or any response. Session tokens are random, only a SHA-256 of each is stored, and they expire after `auth.session_hours` (12) in `config/classpulse.yaml`.
+
+**Create accounts** with the command line, which reads `DATABASE_URL` like the backend and asks for the password twice (a password is never an argument):
+
+```powershell
+python -m backend.accounts create --role admin --email admin@yourschool.edu
+python -m backend.accounts create --role student --email asha@yourschool.edu --student STU001
+python -m backend.accounts create --role teacher --email anita@yourschool.edu --teacher "Dr. Anita Menon"
+python -m backend.accounts list
+python -m backend.accounts reset-password --email asha@yourschool.edu
+python -m backend.accounts delete --email asha@yourschool.edu
+```
+
+A student's register number must already exist (the worker or the simulator registers students, or an admin does with `POST /api/students`), and a teacher's name must match the timetable (upload it first). Passwords need at least 8 characters. An admin can also use Accounts at the bottom of the Admin view: list accounts by email, create one (role, link, initial password) and reset a password. Resetting a password ends that account's open sign-ins.
+
+**Sign-in limits.** A wrong email or password always gives the same message ("Email or password is incorrect"), so it does not show which emails exist. After 5 failed attempts for one email inside 5 minutes (`auth.login_max_failures`, `auth.login_window_minutes`) the backend answers 429 for that email until the window has passed. The count is kept in the backend's memory. The dashboard keeps the token in the browser session's server-side state and never in the URL; reloading the page signs you out, and a session that ended shows "Your session ended. Sign in again".
+
+**The service key.** The worker and the simulator are not people. They send `X-ClassPulse-Key: <CLASSPULSE_SERVICE_KEY>`, and the backend compares it in constant time. Put the same value in `.env` for the backend, the worker and the simulator. There is no default key: with none set, the machine endpoints accept only an admin token, the backend logs that at start-up, the worker logs a clear message and keeps its records in the spool, and the simulator stops with a message. The key opens only the machine endpoints below (and, for the simulator, creating simulated student and teacher accounts); it never opens a student's or teacher's view or the admin overview.
+
+**Simulated demo accounts.** `python -m simulator seed` also creates a simulated account for every simulated teacher and student, on the reserved `classpulse.test` domain: `anita.menon@classpulse.test` for Dr. Anita Menon (first and last name, titles dropped) and `sim-a01@classpulse.test` for `SIM-A01`. They share one password: `CLASSPULSE_DEMO_PASSWORD` if set in `.env`, otherwise a random one made for each run. A generated password is printed once at the end of the run and written, with the emails, to the git-ignored `.spool/demo-credentials.txt`; no password is in the repository. `python -m simulator wipe` removes the accounts with the rest of the simulation.
+
+**What each role can see.**
+
+| Role | Can read | Cannot read |
+| --- | --- | --- |
+| Student | Their own live view, profile, current lecture and marks | Any other student; teacher figures; the admin overview; the list of students |
+| Teacher | Their own feedback, lecture timelines, marks tests, student groups (with their students) and subjects; they upload their own marks | Other teachers' figures, lectures, tests or groups; any student's own live, profile, current or marks endpoints; the admin overview |
+| Admin | The overview, every teacher's figures (alphabetical), the timetable, rooms, lectures, sessions (start and stop), the student list, accounts, simulation | A student's own endpoints (live, profile, current, marks), one teacher's own feedback, groups with students |
+
+Shared lists: `GET /api/teachers`, `/api/subjects` and `/api/sections` are for teachers, admins and the service key, never a student; `GET /api/students`, `/api/lectures`, `/api/sessions`, `/api/rooms` and `/api/timetable` are for admins and the service key; `GET /api/simulation` is open to any signed-in role for the "simulated data" banner, but only an admin or the service key also gets the true effects and the archetypes.
 
 ## Real readings
 
@@ -160,7 +205,7 @@ The Teacher view gives a teacher feedback on their lectures, not a ranking. The 
 
 **On the simulated cohort** (4 weeks, 60 students, built-in effects in the Simulator section) the self-comparison leaves Dr. Anita Menon at about -1.8 points, because 4 of her 5 weekly lectures are at 14:00, which is built 12 points worse. After the slot adjustment she is at about +3.5 and the other four teachers are between -0.8 and -0.1. Of the +6 built in, the slot adjustment recovers about +3.5: the slot effect is estimated from lectures she teaches herself, so some of her advantage is taken out with it.
 
-**Dashboard.** Pick a teacher in the sidebar. The header, four stat cards (self-comparison, slot-adjusted, marks vs own percentile, attendance), the in-lecture attention line for a chosen lecture (attentive / (attentive + distracted) over all students' summed seconds in each 30-second window), Recent lectures and Student groups. The marks card and the Student groups card read the marks the teacher uploads (see Marks) and show "No marks uploaded yet" until then.
+**Dashboard.** Sign in as the teacher. The header, four stat cards (self-comparison, slot-adjusted, marks vs own percentile, attendance), the in-lecture attention line for a chosen lecture (attentive / (attentive + distracted) over all students' summed seconds in each 30-second window), Recent lectures and Student groups. The marks card and the Student groups card read the marks the teacher uploads (see Marks) and show "No marks uploaded yet" until then.
 
 **Attendance.** A teacher's attendance is the students present (in view for at least half of a lecture's full length) over the students expected (the lecture's section size, or the students with records if it has no section), summed over their lectures.
 
@@ -189,7 +234,7 @@ The defaults are in the `simulator:` section of `config/classpulse.yaml`: 2 sect
 
 **Student archetypes** (`engaged`, `average`, `struggling` (attentive, but marks will be low), `disengaged`) set each student's baseline and how often they are absent or not visible. The archetype is stored on the student (`students.archetype`, returned by `GET /api/students`) and is read by the marks simulator (see Marks). The true effects are stored in the `simulation_effects` table and returned by `GET /api/simulation`.
 
-**Marking in the dashboard.** Any view showing simulated data shows a banner ("Simulated data — generated cohort of 60 students over 4 weeks, not real classroom records", counts taken from `GET /api/simulation`). In the Student view the Register number box lists `STU001` and every simulated student; pick `SIM-A01` or type any register number.
+**Marking in the dashboard.** Any view showing simulated data shows a banner ("Simulated data — generated cohort of 60 students over 4 weeks, not real classroom records", counts taken from `GET /api/simulation`). To look at a simulated student's view, sign in as that student (for example `sim-a01@classpulse.test`, see Signing in).
 
 **Before a demo, reseed.** The data ends on the day it was generated, so "the last 4 weeks" move on. Run `python -m simulator seed` on the day (it wipes the old simulation first), and `python -m simulator wipe` to take it all out. Live data (`STU001`, `R101`, `CAM1`, the live timetable and live records) is never touched by either.
 
@@ -202,7 +247,7 @@ The Admin view opens with feedback for all teachers, then the timetable, manual 
 - **Does each figure find the built-in best teacher?** Only with simulated data. For each method, the teacher with the highest value, marked "matches" when that is the teacher with the largest built-in effect and "wrong" when it is not. Teachers whose figures are hidden are not named.
 - The slot-adjusted figure cannot separate a teacher from a slot they always teach in, and the page says so. The figures are feedback, not a ranking.
 
-**Demo.** Reseed with `python -m simulator seed` (the data ends on the day it was generated), pick Admin under View as, and read the comparison card. On the default cohort the plain class average and the self-comparison both put Prof. Rahul Bhat first (he teaches only the better section, in the mornings), and the slot-adjusted figure puts Dr. Anita Menon first, the teacher built to be best. On the small cohort (`seed --small`) the plain class average is also wrong and the slot-adjusted figure is right; the self-comparison is wrong there too.
+**Demo.** Reseed with `python -m simulator seed` (the data ends on the day it was generated), sign in as an admin, and read the comparison card. On the default cohort the plain class average and the self-comparison both put Prof. Rahul Bhat first (he teaches only the better section, in the mornings), and the slot-adjusted figure puts Dr. Anita Menon first, the teacher built to be best. On the small cohort (`seed --small`) the plain class average is also wrong and the slot-adjusted figure is right; the self-comparison is wrong there too.
 
 ## Marks
 
@@ -210,7 +255,7 @@ Teachers upload the marks of tests they already run, and ClassPulse links them t
 
 **File format.** A CSV (UTF-8) or Excel (.xlsx, first sheet) file with the columns `register_no`, `marks` and `max_marks`; see `samples/marks.csv`. Headers are matched ignoring case, spaces and punctuation, and a few variants are accepted (`Register No`, `Roll No`, `Marks Obtained`, `Score`, `Out of`, `Maximum Marks`, and so on). Other columns are ignored, blank lines are skipped, and a file that starts like a zip archive is read as Excel whatever its name. Register numbers match case-insensitively. A student who was away is simply left out of the file.
 
-**Upload.** In the Teacher view, with the teacher chosen in the sidebar, use Upload marks: choose the file, the subject (the teacher's timetabled subject is preselected), the test date and, if you like, a test name such as "Mid-term 1", then press Upload marks. The test belongs to that teacher. Uploading the same teacher, subject, date and name again replaces that test's marks.
+**Upload.** In the Teacher view (signed in as the teacher), use Upload marks in the sidebar: choose the file, the subject (the teacher's timetabled subject is preselected), the test date and, if you like, a test name such as "Mid-term 1", then press Upload marks. The test belongs to that teacher. Uploading the same teacher, subject, date and name again replaces that test's marks.
 
 **The upload is all or nothing.** If any row is invalid (an empty or repeated register number, marks that are not numbers, below zero or above `max_marks`, a `max_marks` that is not above zero) or any register number is not a known student, nothing is stored and every problem is listed by line number. Percentiles depend on every row of a test, so storing part of a file would give wrong ones. A file that cannot be read as a whole (missing columns, empty, not UTF-8, a damaged workbook) is refused with a message.
 
@@ -237,10 +282,10 @@ On the default cohort the "struggling" students (attentive, low marks) land in A
 
 **Demo.**
 
-1. Start the backend and the dashboard, and run `python -m simulator seed` (it also uploads the marks).
-2. Under View as, choose Teacher and pick Dr. Anita Menon. The Marks vs own percentile card shows the figure and "From N tests". The Student groups card shows the 2 x 2 grid for her newest test; use its picker to change test and open Students in each group to list the students.
+1. Start the backend and the dashboard, and run `python -m simulator seed` (it also uploads the marks and creates the simulated accounts).
+2. Sign in as `anita.menon@classpulse.test` with the demo password (Signing in). The Marks vs own percentile card shows the figure and "From N tests". The Student groups card shows the 2 x 2 grid for her newest test; use its picker to change test and open Students in each group to list the students.
 3. To upload your own: in the sidebar choose `samples/marks.csv` under Marks file, check that Subject is Algorithms, choose a Test date and a name such as "Sample", and press Upload marks. A message says how many students were stored, or lists the rows to fix. The new test appears in the Student groups picker.
-4. Choose Admin to see each teacher's marks figure in the Marks column (still no student), and Student with `SIM-A01` to see that student's own marks and percentile for each test. Without marks every view says "No marks yet".
+4. Sign out and sign in as an admin to see each teacher's marks figure in the Marks column (still no student), and as `sim-a01@classpulse.test` to see that student's own marks and percentile for each test. Without marks every view says "No marks yet".
 
 ## Pointing at another backend
 
@@ -255,16 +300,24 @@ The simulator's `--backend-url` option wins over it.
 
 ## Demo steps
 
-1. Start the backend, then the dashboard, then the worker as above (the worker command is in the Run section).
-2. In the dashboard sidebar, set View as to Admin.
+1. Start the backend, then the dashboard, then the worker as above (the worker command is in the Run section). Make sure the accounts exist: an admin, and a student account for `STU001` (`python -m backend.accounts create --role student --email you@yourschool.edu --student STU001`).
+2. Sign in to the dashboard as the admin.
 3. Upload a timetable: under Timetable CSV choose `samples/timetable.csv`. A preview appears; press Replace timetable. The result message lists the slots and the teachers, subjects, rooms and sections created, or the rows that need fixing. To see the timetable pick up a lecture by itself, first edit a row in the CSV so its day and time cover the current local time in room `R101`.
 4. Start a session: under Manual session choose room `R101`, a teacher, a subject and optionally a section, then press Start session. It appears under Manual sessions and overrides the timetable for `R101`.
-5. Run the worker: `python -m worker --student STU001 --camera CAM1`. Sit in view for about 40 seconds. Switch View as to Student: the header names the lecture, and Recent lectures in the Admin view lists it.
+5. Run the worker: `python -m worker --student STU001 --camera CAM1`. Sit in view for about 40 seconds. Sign out and sign in as the `STU001` student: the header names the lecture. As the admin, Recent lectures lists it.
 6. Stop the session: press Stop next to it in the Admin view. New windows now follow the timetable, or have no lecture if no slot covers that time.
 
 ## API
 
 Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
+
+**Access.** Send `Authorization: Bearer <token>` (from `POST /api/auth/login`) on every call below. A missing, unknown, expired or revoked token is 401 (`WWW-Authenticate: Bearer`); a valid caller who may not use the endpoint is 403. "Student" endpoints (`/api/students/{register_no}/live|profile|current|marks`) are only for that student; "teacher" endpoints (`/api/teachers/{id}/feedback|marks/tests|subjects`, `/api/marks/tests/{id}/groups` and `/api/lectures/{id}/timeline` for the teacher's own test or lecture) only for that teacher; `GET /api/admin/overview`, `GET /api/teachers/feedback`, `POST /api/sessions` and `POST /api/sessions/{id}/stop` only for an admin; `POST /api/records`, `POST /api/timetable`, `GET /api/timetable`, `GET /api/rooms`, `PUT /api/cameras/{id}`, `GET` and `POST /api/students`, `GET /api/lectures`, `GET /api/sessions` and `PUT` and `DELETE /api/simulation` for an admin or the service key (`X-ClassPulse-Key`); `POST /api/marks/tests` for the teacher whose test it is, an admin or the service key. The full table is in Signing in.
+
+**Sign-in and accounts**
+
+- `POST /api/auth/login` takes `{"email", "password"}` and returns `{"token", "expires_at", "role", "email", "display_name", "student_register_no", "teacher_id"}` (the last two are null when they do not apply). 401 "Email or password is incorrect" for an unknown email and a wrong password alike; 429 "Too many attempts. Try again in a few minutes" (with `Retry-After`) after 5 failures for one email in 5 minutes.
+- `GET /api/auth/me` returns `{"role", "email", "display_name", "student_register_no", "teacher_id"}` for the token. `POST /api/auth/logout` revokes the token (204).
+- `GET /api/accounts` (admin) lists `[{"id", "email", "role", "student_register_no", "teacher_id", "linked_name", "created_at", "simulated"}]`; there is no password or hash in any response. `POST /api/accounts` (admin; the service key only for simulated student and teacher accounts) takes `{"email", "password", "role", "student_register_no", "teacher_id", "simulated"}` and returns 201 with the account (409 for a taken email or an already linked student or teacher, 422 for a bad email, short password or missing link). `POST /api/accounts/{id}/password` (admin) takes `{"password"}` and ends that account's sessions (204). `DELETE /api/accounts/{id}` (admin, not your own) returns 204.
 
 **Records**
 
@@ -297,7 +350,7 @@ Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
 - `GET /api/marks/tests/{id}/groups` returns `{"test", "attention_line", "median_score", "n_students", "n_covered_lectures", "counts": {"On track", "Attentive but struggling", "Knows it already", "At risk", "Insufficient data"}, "students"}`. `students` is null unless `?students=true`, which only the teacher's own view uses; each student has `register_no`, `name`, `section`, `marks`, `max_marks`, `marks_percentile`, `attention`, `attention_percentile`, `reason` and `group`.
 - `GET /api/students/{register_no}/marks` returns `{"register_no", "simulated", "tests": [{"test_id", "name", "subject", "teacher", "test_date", "marks", "max_marks", "percentile", "n_students"}]}`, newest first, for that student only.
 - Every teacher summary (`GET /api/teachers/{id}/feedback`, `GET /api/teachers/feedback`, `GET /api/admin/overview`) carries `marks`: `{"value", "low", "high", "n_students", "n_tests", "reason"}` in percentile points, with `value` null and `reason` "no marks uploaded" when the teacher has no tests.
-- `DELETE /api/simulation` also removes simulated tests and the marks of simulated tests and simulated students (counts `tests` and `marks`).
+- `DELETE /api/simulation` also removes simulated tests and the marks of simulated tests and simulated students, and simulated accounts (counts `tests`, `marks` and `accounts`).
 
 **Students and simulation**
 
@@ -309,7 +362,7 @@ Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
 
 - `GET /api/rooms` returns `[{"id", "cameras": [...]}]`.
 - `PUT /api/cameras/{camera_id}` with `{"room_id"}` registers or moves a camera. Returns `{"id", "room_id", "camera_created", "room_created"}`.
-- `GET /api/teachers`, `GET /api/subjects`, `GET /api/sections` return `[{"id", "name"}]` sorted by name.
+- `GET /api/teachers`, `GET /api/subjects`, `GET /api/sections` return `[{"id", "name"}]` sorted by name. `GET /api/teachers/{id}/subjects` returns the subjects that teacher is timetabled for.
 
 **Lectures and sessions**
 
@@ -325,7 +378,8 @@ Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
 pytest                       # full suite
 pytest tests/test_window_aggregator.py
 pytest tests/test_dashboard_render.py   # dashboard checks, no backend or database needed
+pytest tests/test_access_matrix.py      # who may call which endpoint, with sign-in enforced
 mypy                         # configured in pyproject.toml
 ```
 
-The backend API tests run against `TEST_DATABASE_URL` and drop and recreate the tables in that database for each test, so point it at a database you do not mind wiping. If `TEST_DATABASE_URL` is not set they are skipped with a message.
+The logic tests build the backend with `auth_required=False` (every check is a no-op); the sign-in and access tests build it with `auth_required=True`, and `python -m backend` always does. The backend API tests run against `TEST_DATABASE_URL` and drop and recreate the tables in that database for each test, so point it at a database you do not mind wiping. If `TEST_DATABASE_URL` is not set they are skipped with a message.

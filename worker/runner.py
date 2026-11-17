@@ -20,8 +20,8 @@ from typing import Any
 
 import cv2
 
-from shared.config import PROJECT_ROOT, Config
-from worker.client import HttpSender
+from shared.config import PROJECT_ROOT, Config, service_key
+from worker.client import NO_KEY_MESSAGE, HttpSender
 from worker.concurrency import BackgroundDelivery, LatestFrame, Status, StatusBoard
 from worker.delivery import Spool
 from worker.detector import HaarReadingSource
@@ -73,7 +73,10 @@ def run(
         return 1
     capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # ask for no backlog; the capture thread drains it anyway
 
-    delivery = BackgroundDelivery(HttpSender(config.backend_url), Spool(spool_path))
+    key = service_key()
+    if key is None:
+        log.warning(NO_KEY_MESSAGE)
+    delivery = BackgroundDelivery(HttpSender(config.backend_url, service_key=key), Spool(spool_path))
     tracker = AttentionTracker(camera, student, config.window_seconds, StateThresholds.from_config(config.raw))
     latest = LatestFrame()
     board = StatusBoard()

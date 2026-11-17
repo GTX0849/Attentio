@@ -5,18 +5,32 @@ import requests
 from shared.schema import AttentionRecord
 from worker.delivery import SendError
 
+SERVICE_KEY_HEADER = "X-ClassPulse-Key"
+NO_KEY_MESSAGE = (
+    "CLASSPULSE_SERVICE_KEY is not set, so the backend will refuse these records. Put the same "
+    "key in .env for the backend and the worker (see Signing in in the README). Records stay in the "
+    "spool until it is set."
+)
+
 
 class HttpSender:
-    def __init__(self, backend_url: str, timeout: float = 3.0) -> None:
+    """Posts windows to `/api/records`, with the service key in `X-ClassPulse-Key` when there is one."""
+
+    def __init__(self, backend_url: str, timeout: float = 3.0, service_key: str | None = None) -> None:
         self._url = backend_url.rstrip("/") + "/api/records"
         self._timeout = timeout
+        self._headers = {SERVICE_KEY_HEADER: service_key} if service_key else {}
 
     def send(self, records: list[AttentionRecord]) -> None:
         payload = [r.model_dump(mode="json") for r in records]
         try:
-            resp = requests.post(self._url, json=payload, timeout=self._timeout)
+            resp = requests.post(self._url, json=payload, headers=self._headers, timeout=self._timeout)
         except requests.RequestException as e:
             raise SendError(f"backend unreachable: {e}") from e
+        if resp.status_code in (401, 403):
+            # A missing or wrong key is fixed by configuration, so keep the records and retry.
+            reason = "the service key is wrong" if self._headers else NO_KEY_MESSAGE
+            raise SendError(f"backend refused the records ({resp.status_code}): {reason}")
         if resp.status_code >= 500:
             raise SendError(f"backend error {resp.status_code}")
         if resp.status_code >= 400:

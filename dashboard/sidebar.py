@@ -1,85 +1,62 @@
-"""The sidebar: wordmark, role switcher, the role's own control and the states legend."""
+"""The sidebar after sign-in: wordmark, who is signed in, Sign out, the role's own controls and the legend.
 
-from typing import Any
+There is no role switcher: the role comes from the account.
+"""
+
+from html import escape
 
 import streamlit as st
 
-from dashboard import api, theme
-from dashboard.api import BackendError
-from dashboard.views import admin, student, teacher
+from dashboard import api, session, theme
+from dashboard.session import Identity
+from dashboard.views import admin, teacher
 from shared.config import Config
 
-ROLES = ["Student", "Teacher", "Admin"]
+ROLE_LABELS = {"student": "Student", "teacher": "Teacher", "admin": "Admin"}
+SIGN_OUT = "Sign out"
 
 
-def render_sidebar(config: Config) -> str:
-    """Draw the sidebar and return the chosen role (key `role` in session state)."""
+def identity_html(identity: Identity) -> str:
+    """The signed-in name with the role under it (and the email when the name is something else)."""
+    role = ROLE_LABELS.get(identity.role, identity.role)
+    email = (
+        f'<div style="font-size:13px;color:{theme.SECONDARY_TEXT};overflow-wrap:anywhere;">'
+        f"{escape(identity.email)}</div>"
+        if identity.email and identity.email != identity.display_name
+        else ""
+    )
+    return (
+        f'<div style="padding:2px 0 4px 0;">'
+        f'<div style="font-size:12px;text-transform:uppercase;letter-spacing:0.12em;'
+        f'color:{theme.SECONDARY_TEXT};">{escape(role)}</div>'
+        f'<div style="font-size:15px;font-weight:600;color:{theme.TEXT};overflow-wrap:anywhere;">'
+        f"{escape(identity.display_name or identity.email)}</div>{email}</div>"
+    )
+
+
+def sign_out(config: Config) -> None:
+    """Button callback: end the sign-in on the backend, then forget it here."""
+    api.logout(config.backend_url)
+    session.end()
+
+
+def render_sidebar(config: Config, identity: Identity) -> None:
+    """Draw the sidebar for the signed-in person."""
     theme.pin_legend_css()
     with st.sidebar:
         theme.wordmark()
-        role = (
-            st.segmented_control(
-                "View as", ROLES, default=ROLES[0], key="role", width="stretch"
-            )
-            or ROLES[0]
+        st.html(identity_html(identity))
+        st.button(
+            SIGN_OUT,
+            icon=":material/logout:",
+            width="stretch",
+            on_click=sign_out,
+            args=(config,),
+            key="sign_out",
         )
         st.divider()
-        if role == "Student":
-            _student_select(config)
-        elif role == "Teacher":
-            _teacher_select(config)
-        else:
+        if identity.role == "teacher" and identity.teacher_id is not None:
+            teacher.sidebar_controls(config, {"id": identity.teacher_id, "name": identity.display_name})
+        elif identity.role == "admin":
             admin.sidebar_controls(config)
         theme.states_legend()
-    return role
-
-
-def student_options(students: list[dict[str, Any]]) -> dict[str, str]:
-    """Register number -> label for the student picker. STU001 is always offered, first."""
-    labels = {student.DEFAULT_REGISTER_NO: student.DEFAULT_REGISTER_NO}
-    for s in students:
-        parts = [s["register_no"], s.get("name"), s.get("section")]
-        labels[s["register_no"]] = " · ".join(str(p) for p in parts if p)
-    return labels
-
-
-def _student_select(config: Config) -> None:
-    """Pick a known student (STU001 and the simulated ones) or type any register number."""
-    try:
-        labels = student_options(api.list_students(config.backend_url))
-    except BackendError as e:
-        st.warning(str(e))
-        labels = student_options([])
-    st.selectbox(
-        "Register number",
-        list(labels),
-        index=0,
-        format_func=lambda register_no: labels.get(register_no, register_no),
-        accept_new_options=True,
-        required=True,
-        help="Pick a student, or type a register number. Simulated students are SIM-A01 to SIM-B30.",
-        key=student.REGISTER_NO_KEY,
-        persist_state="session",
-    )
-
-
-def _teacher_select(config: Config) -> None:
-    """Pick one of the real teachers; the Teacher view shows that teacher's feedback."""
-    try:
-        teachers = api.list_teachers(config.backend_url)
-    except BackendError as e:
-        st.warning(str(e))
-        return
-    names = [t["name"] for t in teachers]
-    if not names:
-        st.caption(teacher.NO_TEACHERS)
-        return
-    chosen = st.selectbox(
-        "Teacher",
-        names,
-        index=0,
-        key=teacher.TEACHER_KEY,
-        persist_state="session",
-    )
-    selected = next((t for t in teachers if t["name"] == chosen), teachers[0])
-    teacher.sidebar_controls(config, selected)

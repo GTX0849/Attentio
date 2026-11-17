@@ -1,7 +1,7 @@
 """The loaded simulation: its stored true effects, a summary, and the wipe.
 
 Simulated data is flagged `simulated` on students, rooms, cameras, teachers,
-subjects, sections, timetable slots, lectures and marks tests. Records are simulated when
+subjects, sections, timetable slots, lectures, accounts and marks tests. Records are simulated when
 their student is; marks go with their test or their student. The wipe deletes exactly those rows and the stored effects;
 live rows are never touched. A simulated teacher, subject, section, room or
 camera that something live still points to is kept.
@@ -13,6 +13,7 @@ from sqlalchemy import CursorResult, Executable, delete, exists, func, or_, sele
 from sqlalchemy.orm import Session
 
 from backend.models import (
+    Account,
     AttentionRecordRow,
     Camera,
     Lecture,
@@ -95,6 +96,9 @@ def _run(session: Session, statement: Executable) -> int:
 def wipe(session: Session) -> WipeResult:
     """Delete all simulated data, in foreign key order, and report how much of each."""
     simulated_students = select(Student.register_no).where(Student.simulated)
+    # Simulated accounts first (their sessions go with them); an account linked to a simulated student
+    # or teacher is also removed by the database when that row goes.
+    accounts = _run(session, delete(Account).where(Account.simulated))
     # Marks of simulated tests and of simulated students; a live test that is left with no marks goes too.
     marks = _run(
         session,
@@ -181,4 +185,5 @@ def wipe(session: Session) -> WipeResult:
         effects=effects,
         tests=tests,
         marks=marks,
+        accounts=accounts,
     )

@@ -54,10 +54,44 @@ def make_client(clock: FakeClock) -> ClientFactory:
         Base.metadata.drop_all(engine)
         engine.dispose()
         # The app start-up recreates the tables and seeds R101, CAM1 and STU001.
-        with TestClient(create_app(url, timezone=timezone, clock=clock)) as test_client:
+        with TestClient(create_app(url, timezone=timezone, clock=clock, auth_required=False)) as test_client:
             yield test_client
 
     return build
+
+
+SERVICE_KEY = "test-service-key-0123456789"
+
+
+@pytest.fixture
+def make_secure_client(clock: FakeClock) -> ClientFactory:
+    """Like `make_client`, but with sign-in enforced (`auth_required=True`) and a service key set.
+
+    `service_key=""` builds the app with no key configured.
+    """
+    url = test_database_url()
+    if url is None:
+        pytest.skip("TEST_DATABASE_URL is not set (create .env from .env.example)")
+
+    @contextmanager
+    def build(timezone: str = "Asia/Kolkata", service_key: str = SERVICE_KEY) -> Iterator[TestClient]:
+        assert url is not None
+        ensure_database_exists(url)
+        engine = create_engine(url)
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+        app = create_app(url, timezone=timezone, clock=clock, auth_required=True, service_key=service_key)
+        with TestClient(app) as test_client:
+            yield test_client
+
+    return build
+
+
+@pytest.fixture
+def secure_client(make_secure_client: ClientFactory) -> Iterator[TestClient]:
+    """The backend with sign-in enforced, on clean tables (only the seeded R101, CAM1 and STU001)."""
+    with make_secure_client() as test_client:
+        yield test_client
 
 
 @pytest.fixture

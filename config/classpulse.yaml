@@ -10,6 +10,12 @@ backend:
 dashboard:
   refresh_seconds: 10
 
+# Sign-in (backend/auth.py). Accounts are made with python -m backend.accounts.
+auth:
+  session_hours: 12              # a sign-in stops working this long after it was made
+  login_max_failures: 5          # failed sign-ins per username inside the window, then 429
+  login_window_minutes: 5
+
 # Attention state rules (worker/states.py). Angles are degrees relative to the
 # student's calibration pose; positive pitch = looking down.
 states:

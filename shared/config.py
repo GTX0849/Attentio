@@ -56,3 +56,18 @@ def database_url() -> str:
 def test_database_url() -> str | None:
     """None when TEST_DATABASE_URL is not configured (tests then skip)."""
     return _env("TEST_DATABASE_URL")
+
+
+SERVICE_KEY_ENV = "CLASSPULSE_SERVICE_KEY"
+DEMO_PASSWORD_ENV = "CLASSPULSE_DEMO_PASSWORD"
+
+
+def service_key() -> str | None:
+    """The key the worker and the simulator send in `X-ClassPulse-Key`. None when not configured:
+    there is no default, so the machine endpoints then accept only an admin token."""
+    return _env(SERVICE_KEY_ENV)
+
+
+def demo_password() -> str | None:
+    """The password for simulated accounts, when the person running the simulator chose one."""
+    return _env(DEMO_PASSWORD_ENV)

@@ -5,9 +5,22 @@ from typing import Any
 
 import requests
 
+from dashboard import session
+from dashboard.session import SessionExpired
+
+__all__ = ["BackendError", "SessionExpired", "SignInError"]
+
 
 class BackendError(Exception):
     """The backend could not give an answer; the message is safe to show the user."""
+
+
+class SignInError(Exception):
+    """Signing in failed. `kind` is "invalid", "rate_limited", "unreachable" or "error"."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
 
 
 def _call(
@@ -21,10 +34,16 @@ def _call(
     data: dict[str, Any] | None = None,
 ) -> Any:
     url = f"{backend_url.rstrip('/')}{path}"
+    token = session.token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
-        resp = requests.request(method, url, params=params, json=json, files=files, data=data, timeout=10)
+        resp = requests.request(
+            method, url, params=params, json=json, files=files, data=data, headers=headers, timeout=10
+        )
     except requests.RequestException as e:
         raise BackendError(f"Cannot reach the backend at {backend_url}: {e}") from e
+    if resp.status_code == 401 and token:
+        raise SessionExpired()  # the token expired, was revoked, or the account was removed
     if not resp.ok:
         detail = ""
         try:
@@ -32,7 +51,76 @@ def _call(
         except (ValueError, AttributeError):
             pass
         raise BackendError(detail or f"Backend error {resp.status_code}")
-    return resp.json()
+    return None if resp.status_code == 204 else resp.json()
+
+
+def login(backend_url: str, email: str, password: str) -> dict[str, Any]:
+    """Sign in. Returns `{token, role, email, display_name, student_register_no, teacher_id, ...}`.
+
+    Raises SignInError. Sent without a token, so a 401 here is "wrong email or password".
+    """
+    url = f"{backend_url.rstrip('/')}/api/auth/login"
+    try:
+        resp = requests.post(url, json={"email": email, "password": password}, timeout=10)
+    except requests.RequestException as e:
+        raise SignInError("unreachable") from e
+    if resp.status_code == 401:
+        raise SignInError("invalid")
+    if resp.status_code == 429:
+        raise SignInError("rate_limited")
+    if not resp.ok:
+        raise SignInError("error")
+    body: dict[str, Any] = resp.json()
+    return body
+
+
+def logout(backend_url: str) -> None:
+    """End this sign-in on the backend. Failing to reach it does not matter: the token expires anyway."""
+    try:
+        _call(backend_url, "POST", "/api/auth/logout")
+    except (BackendError, SessionExpired):
+        pass
+
+
+def list_accounts(backend_url: str) -> list[dict[str, Any]]:
+    """Every account (admin only): `id`, `email`, `role`, `linked_name`, `created_at`, `simulated`. No passwords."""
+    rows: list[dict[str, Any]] = _call(backend_url, "GET", "/api/accounts")
+    return rows
+
+
+def create_account(
+    backend_url: str,
+    email: str,
+    password: str,
+    role: str,
+    student_register_no: str | None,
+    teacher_id: int | None,
+) -> dict[str, Any]:
+    """Make an account (admin only). See POST /api/accounts."""
+    body: dict[str, Any] = _call(
+        backend_url,
+        "POST",
+        "/api/accounts",
+        json={
+            "email": email,
+            "password": password,
+            "role": role,
+            "student_register_no": student_register_no,
+            "teacher_id": teacher_id,
+        },
+    )
+    return body
+
+
+def reset_account_password(backend_url: str, account_id: int, password: str) -> None:
+    """Set a new password for an account (admin only); its sessions end."""
+    _call(backend_url, "POST", f"/api/accounts/{account_id}/password", json={"password": password})
+
+
+def list_teacher_subjects(backend_url: str, teacher_id: int) -> list[dict[str, Any]]:
+    """The subjects the teacher is timetabled for. See GET /api/teachers/{id}/subjects."""
+    subjects: list[dict[str, Any]] = _call(backend_url, "GET", f"/api/teachers/{teacher_id}/subjects")
+    return subjects
 
 
 def get_live(backend_url: str, register_no: str, minutes: int) -> list[dict[str, Any]]:

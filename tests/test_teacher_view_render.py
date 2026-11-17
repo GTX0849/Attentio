@@ -112,9 +112,7 @@ def teacher_data(fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyP
 
 
 def teacher_page() -> tuple[Any, str]:
-    at = run_app()
-    at.session_state["role"] = "Teacher"
-    at.run()
+    at = run_app("teacher")
     assert not at.exception
     return at, html_of(at)
 
@@ -124,7 +122,8 @@ def teacher_page() -> tuple[Any, str]:
 
 def test_the_header_and_banner_come_from_the_teachers_data(teacher_data: dict[str, list[Any]]) -> None:
     at, page = teacher_page()
-    assert at.sidebar.selectbox(key="teacher_name").value == "Dr. Meera Iyer"
+    assert "teacher_name" not in [s.key for s in at.sidebar.selectbox]  # no teacher picker
+    assert [b.key for b in at.sidebar.button if b.key == "sign_out"] == ["sign_out"]
     assert teacher_data["feedback"] == [1]
     assert page.index(BANNER) < page.index("Teacher · Dr. Meera Iyer")  # the banner is at the top
     assert "Feedback on your lectures" in page
@@ -244,13 +243,12 @@ def test_a_backend_error_is_shown_in_place(
     assert "Feedback on your lectures" in page
 
 
-def test_no_teachers_at_all_asks_for_a_timetable(
-    fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+def test_a_teacher_account_that_is_not_linked_to_a_teacher_says_so(
+    fake_backend: dict[str, list[Any]],  # noqa: F811
 ) -> None:
-    monkeypatch.setattr(api, "list_teachers", lambda url: [])
-    at, page = teacher_page()
-    assert "Feedback on your lectures" in page
-    assert teacher.NO_TEACHERS in [i.value for i in at.info]
+    at = run_app("teacher", teacher_id=None)
+    assert not at.exception
+    assert any("not linked to a teacher" in e.value for e in at.error)
 
 
 # ---- wording helpers -------------------------------------------------------------------------------------------

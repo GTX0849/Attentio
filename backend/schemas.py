@@ -326,6 +326,7 @@ class WipeResult(BaseModel):
     effects: int
     tests: int = 0  # marks tests removed
     marks: int = 0  # marks removed
+    accounts: int = 0  # simulated accounts removed
 
 
 # ---- teacher feedback ------------------------------------------------------------------------
@@ -525,3 +526,54 @@ class StudentMarksResponse(BaseModel):
     register_no: str
     simulated: bool
     tests: list[StudentMarkRow]
+
+
+# ---- accounts and sign-in -----------------------------------------------------------------------
+
+Role = Literal["student", "teacher", "admin"]
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=254)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class Identity(BaseModel):
+    """Who is signed in. `student_register_no` is set for students, `teacher_id` for teachers."""
+
+    role: Role
+    email: str
+    display_name: str
+    student_register_no: str | None = None
+    teacher_id: int | None = None
+
+
+class LoginResponse(Identity):
+    token: str
+    expires_at: datetime
+
+
+class AccountCreate(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=200)
+    role: Role
+    student_register_no: str | None = None  # students
+    teacher_id: int | None = None
+    simulated: bool = False
+
+
+class PasswordReset(BaseModel):
+    password: str = Field(max_length=200)
+
+
+class AccountOut(BaseModel):
+    """An account as listed. There is no password and no hash in any response."""
+
+    id: int
+    email: str
+    role: Role
+    student_register_no: str | None
+    teacher_id: int | None
+    linked_name: str | None
+    created_at: datetime
+    simulated: bool
