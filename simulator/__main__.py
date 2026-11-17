@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(
         f"Done in {report.seconds:.0f} s: {report.students} students, "
-        f"{report.lectures} lectures, {report.records} records"
+        f"{report.lectures} lectures, {report.records} records, {report.tests} tests with {report.marks} marks"
     )
     return 0
 

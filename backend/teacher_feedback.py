@@ -19,14 +19,16 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Integer, func, select
 from sqlalchemy.orm import Session
 
-from backend import metrics, teacher_figures
+from backend import marks_service, metrics, teacher_figures
 from backend.lectures import MANUAL
+from backend.marks import MarksFigure
 from backend.metrics import Seconds
 from backend.models import AttentionRecordRow, Lecture, Section, Student, Teacher
 from backend.schemas import (
     AdminOverview,
     FigureOut,
     LectureOut,
+    MarksFigureOut,
     SectionAttendance,
     TeacherAttendance,
     TeacherFeedback,
@@ -120,6 +122,7 @@ def _summary(
     rows: list[TeacherLectureRow],
     settings: TeacherSettings,
     class_average: float | None,
+    marks_figure: MarksFigure | None,
 ) -> TeacherSummary:
     present = sum(r.present for r in rows)
     expected = sum(r.expected for r in rows)
@@ -138,6 +141,7 @@ def _summary(
         class_average=class_average,
         self_comparison=TeacherFigureOut.from_figure(figures.self_comparison),
         slot_adjusted=TeacherFigureOut.from_figure(figures.slot_adjusted),
+        marks=MarksFigureOut.from_figure(marks_figure),
         attendance=TeacherAttendance(
             present=present, expected=expected, rate=present / expected if expected else None
         ),
@@ -194,9 +198,11 @@ def _everyone(
     rows = _lecture_rows(data, now, min_presence)
     by_teacher = _teacher_rows(rows)
     averages = _class_averages(data, min_presence)
+    marks = marks_service.marks_figures(session, settings.range_level)
     teachers = session.scalars(select(Teacher).order_by(Teacher.name)).all()
     summaries = [
-        _summary(t, figures.get(t.id), by_teacher.get(t.id, []), settings, averages.get(t.id)) for t in teachers
+        _summary(t, figures.get(t.id), by_teacher.get(t.id, []), settings, averages.get(t.id), marks.get(t.id))
+        for t in teachers
     ]
     return summaries, rows
 
@@ -241,7 +247,8 @@ def build_one(
     figures = _figures(data, tz, settings, min_presence)
     rows = _teacher_rows(_lecture_rows(data, now, min_presence)).get(teacher.id, [])
     average = _class_averages(data, min_presence).get(teacher.id)
-    summary = _summary(teacher, figures.get(teacher.id), rows, settings, average)
+    marks = marks_service.marks_figures(session, settings.range_level).get(teacher.id)
+    summary = _summary(teacher, figures.get(teacher.id), rows, settings, average, marks)
     return TeacherFeedback(
         **summary.model_dump(),
         timezone=tz.key,

@@ -66,17 +66,20 @@ def _student_select(config: Config) -> None:
 def _teacher_select(config: Config) -> None:
     """Pick one of the real teachers; the Teacher view shows that teacher's feedback."""
     try:
-        names = [t["name"] for t in api.list_teachers(config.backend_url)]
+        teachers = api.list_teachers(config.backend_url)
     except BackendError as e:
         st.warning(str(e))
         return
+    names = [t["name"] for t in teachers]
     if not names:
         st.caption(teacher.NO_TEACHERS)
         return
-    st.selectbox(
+    chosen = st.selectbox(
         "Teacher",
         names,
         index=0,
         key=teacher.TEACHER_KEY,
         persist_state="session",
     )
+    selected = next((t for t in teachers if t["name"] == chosen), teachers[0])
+    teacher.sidebar_controls(config, selected)

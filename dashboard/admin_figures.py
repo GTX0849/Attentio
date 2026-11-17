@@ -48,6 +48,8 @@ CHECK_TITLE = "Does each figure find the built-in best teacher?"
 CHECK_SUBTITLE = "Highest value under each method, simulated data only"
 NO_BUILT_IN = "Built-in effects are known only for simulated data."
 NO_BUILT_IN_BEST = "No single built-in best teacher to compare with."
+NO_MARKS = "No marks yet. Teachers upload marks from the Teacher view"
+MARKS_NOTE = "Marks: how the teacher's students rank in the teacher's tests against their average rank in all tests, in percentile points"
 
 
 def hidden_text(min_lectures: int) -> str:
@@ -72,6 +74,18 @@ def built_in_text(value: float) -> str:
 
 def percent(value: float | None) -> str:
     return NO_DATA if value is None else f"{value:.1%}"
+
+
+def marks_text(marks: dict[str, Any] | None) -> str:
+    """A teacher's marks figure in percentile points to the whole point: "+6", "−2", "0"; a dash with no marks."""
+    if marks is None or marks["value"] is None:
+        return NO_DATA
+    whole = round(marks["value"])
+    return "0" if whole == 0 else f"{whole:+d}".replace("-", MINUS)
+
+
+def any_marks(teachers: list[dict[str, Any]]) -> bool:
+    return any(t.get("marks") and t["marks"]["n_tests"] > 0 for t in teachers)
 
 
 # ---- the range bar --------------------------------------------------------------------------------------------
@@ -156,7 +170,15 @@ def _row_html(teacher: dict[str, Any], columns: str, min_lectures: int, effects:
     else:
         cells.append(range_cell_html(teacher["self_comparison"], PRIMARY))
         cells.append(range_cell_html(teacher["slot_adjusted"], TEXT))
-    cells.append(_cell(NO_DATA, align="right", colour=SECONDARY_TEXT))  # marks: CLA-15
+    marks = teacher.get("marks")
+    cells.append(
+        _cell(
+            marks_text(marks),
+            align="right",
+            colour=SECONDARY_TEXT if marks is None or marks["value"] is None else TEXT,
+            weight=400 if marks is None or marks["value"] is None else 500,
+        )
+    )
     if effects is not None:
         built_in = effects.get(teacher["teacher"], 0.0) if teacher["simulated"] else None
         cells.append(

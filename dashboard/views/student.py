@@ -19,6 +19,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from dashboard import api
 from dashboard.api import BackendError, get_live
 from dashboard.api import get_student_current as get_current
 from dashboard.api import get_student_profile as get_profile
@@ -43,6 +44,7 @@ PROFILE_REFRESH_SECONDS = 60  # semester figures change slowly
 TITLE = "Your attention, live"
 NO_DATA = "—"
 EMPTY_LECTURES = "No lectures yet — upload a timetable or start a session in the Admin view"
+NO_MARKS = "No marks yet"
 REASONS = {
     "low_presence": "Not enough time in view",
     "no_records": "No records yet",
@@ -310,6 +312,26 @@ def left_out(rows: list[dict[str, Any]]) -> str:
     return f"Not enough time in view: {', '.join(names)}" if names else ""
 
 
+def marks_frame(tests: list[dict[str, Any]]) -> pd.DataFrame:
+    """One row per test, newest first: date, test, subject, marks ("40 of 50") and percentile in the class."""
+    return pd.DataFrame(
+        {
+            "Date": [_day(t["test_date"]) for t in tests],
+            "Test": [t["name"] or NO_DATA for t in tests],
+            "Subject": [t["subject"] for t in tests],
+            "Teacher": [t["teacher"] for t in tests],
+            "Marks": [f"{t['marks']:g} of {t['max_marks']:g}" for t in tests],
+            "Percentile": [f"{t['percentile']:.0f}" for t in tests],
+        }
+    )
+
+
+def _day(day: str) -> str:
+    """"Mon 9 Mar" from "2026-03-09"."""
+    moment = datetime.fromisoformat(day)
+    return f"{moment:%a} {moment.day} {moment:%b}"
+
+
 def attendance_frame(rows: list[dict[str, Any]], tz: ZoneInfo) -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -436,6 +458,10 @@ def semester_view(config: Config, register_no: str) -> None:
         else:
             st.altair_chart(hours_chart(hours), alt="Attention by local hour of the day")
 
+    with st.container(border=True):
+        st.subheader("Marks")
+        marks_figure(config, register_no)
+
     with st.expander("Attendance"):
         rows = profile["attendance"]
         if not rows:
@@ -447,6 +473,20 @@ def semester_view(config: Config, register_no: str) -> None:
                 f"A lecture counts as attended at {profile['min_presence_ratio']:.0%} in view or more of its full length"
             )
             st.dataframe(attendance_frame(rows, tz), hide_index=True, alt="Attendance for each lecture")
+
+
+def marks_figure(config: Config, register_no: str) -> None:
+    """The student's own marks and percentile in each test, from GET /api/students/{id}/marks."""
+    try:
+        tests = api.get_student_marks(config.backend_url, register_no)["tests"]
+    except BackendError as e:
+        st.caption(str(e))
+        return
+    if not tests:
+        st.caption(NO_MARKS)
+        return
+    st.caption("Percentile is your place among the students who sat the test: 50 is the middle")
+    st.dataframe(marks_frame(tests), hide_index=True, alt="Your marks and percentile in each test")
 
 
 def subject_figure(rows: list[dict[str, Any]]) -> None:

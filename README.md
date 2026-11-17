@@ -13,10 +13,10 @@ The worker decides states with the rules in the `states:` section of `config/cla
 | `backend/` | FastAPI app, SQLAlchemy models, timetable and lecture logic, seeding |
 | `dashboard/` | Streamlit app; one module per role in `dashboard/views/`, shared look in `dashboard/theme.py` |
 | `.streamlit/` | Streamlit theme (colours and IBM Plex fonts) |
-| `samples/` | `timetable.csv`, a sample weekly timetable for the demo |
+| `samples/` | `timetable.csv`, a sample weekly timetable, and `marks.csv`, a sample marks file for the simulated cohort, for the demo |
 | `simulator/` | Simulated classroom history: cohort, timetable and records generated and sent through the backend API (see Simulator) |
 | `tests/` | pytest suite |
-| `config/classpulse.yaml` | The one shared config file (fps, window length, backend URL, refresh, simulator sizes and effects) |
+| `config/classpulse.yaml` | The one shared config file (fps, window length, backend URL, refresh, the marks attention line, simulator sizes and effects) |
 
 ## Setup (Windows)
 
@@ -158,7 +158,7 @@ The Teacher view gives a teacher feedback on their lectures, not a ranking. The 
 
 **On the simulated cohort** (4 weeks, 60 students, built-in effects in the Simulator section) the self-comparison leaves Dr. Anita Menon at about -1.8 points, because 4 of her 5 weekly lectures are at 14:00, which is built 12 points worse. After the slot adjustment she is at about +3.5 and the other four teachers are between -0.8 and -0.1. Of the +6 built in, the slot adjustment recovers about +3.5: the slot effect is estimated from lectures she teaches herself, so some of her advantage is taken out with it.
 
-**Dashboard.** Pick a teacher in the sidebar. The header, four stat cards (self-comparison, slot-adjusted, marks vs own percentile, attendance), the in-lecture attention line for a chosen lecture (attentive / (attentive + distracted) over all students' summed seconds in each 30-second window), Recent lectures and Student groups. The marks card and the Student groups card show a plain placeholder until marks are uploaded (hooks: `marks_card` and `student_groups` in `dashboard/views/teacher.py`).
+**Dashboard.** Pick a teacher in the sidebar. The header, four stat cards (self-comparison, slot-adjusted, marks vs own percentile, attendance), the in-lecture attention line for a chosen lecture (attentive / (attentive + distracted) over all students' summed seconds in each 30-second window), Recent lectures and Student groups. The marks card and the Student groups card read the marks the teacher uploads (see Marks) and show "No marks uploaded yet" until then.
 
 **Attendance.** A teacher's attendance is the students present (in view for at least half of a lecture's full length) over the students expected (the lecture's section size, or the students with records if it has no section), summed over their lectures.
 
@@ -173,7 +173,7 @@ python -m simulator seed --weeks 2 --seed 7 --backend-url http://127.0.0.1:8012
 python -m simulator wipe                 # removes all simulated data
 ```
 
-The defaults are in the `simulator:` section of `config/classpulse.yaml`: 2 sections (`SIM-A`, `SIM-B`) of 30 students (`SIM-A01` to `SIM-B30`), 5 teachers, 4 weeks of lectures ending today (weekdays, four 50-minute slots a day: 09:00, 10:00, 11:00, 14:00; rooms `SIM-R201`, `SIM-R202`, cameras `SIM-CAM-201`, `SIM-CAM-202`). The backend must be running. A full run is about 450,000 records and takes a few minutes; progress is printed. The same seed gives the same data.
+The defaults are in the `simulator:` section of `config/classpulse.yaml`: 2 sections (`SIM-A`, `SIM-B`) of 30 students (`SIM-A01` to `SIM-B30`), 5 teachers, 4 weeks of lectures ending today (weekdays, four 50-minute slots a day: 09:00, 10:00, 11:00, 14:00; rooms `SIM-R201`, `SIM-R202`, cameras `SIM-CAM-201`, `SIM-CAM-202`). The backend must be running. A full run is about 450,000 records and takes a few minutes; progress is printed. The same seed gives the same data. Seeding also uploads the simulated marks through the marks endpoint (see Marks), and `wipe` removes them.
 
 **Built-in effects (the right answer).** The mean attention of a window is `student baseline + section effect + teacher effect + slot effect`, plus noise, with some neutral time, some not-visible windows and a few absences:
 
@@ -185,7 +185,7 @@ The defaults are in the `simulator:` section of `config/classpulse.yaml`: 2 sect
 
 **Why the plain average misleads.** The timetable is built so that the plain class average ranks teachers wrongly: Dr. Anita Menon teaches 4 of her 5 weekly lectures at 14:00 (so she is punished), Prof. Rahul Bhat teaches only `SIM-A` and only in the mornings (so he is flattered), and the 14:00 slot is shared by four teachers on different days, so the slot effect can be told apart from any one teacher. A test (`tests/test_simulator_generation.py`) checks that the plain averages mis-order the teachers.
 
-**Student archetypes** (`engaged`, `average`, `struggling` (attentive, but marks will be low), `disengaged`) set each student's baseline and how often they are absent or not visible. The archetype is stored on the student (`students.archetype`, returned by `GET /api/students`) for the marks simulator to read. The true effects are stored in the `simulation_effects` table and returned by `GET /api/simulation`.
+**Student archetypes** (`engaged`, `average`, `struggling` (attentive, but marks will be low), `disengaged`) set each student's baseline and how often they are absent or not visible. The archetype is stored on the student (`students.archetype`, returned by `GET /api/students`) and is read by the marks simulator (see Marks). The true effects are stored in the `simulation_effects` table and returned by `GET /api/simulation`.
 
 **Marking in the dashboard.** Any view showing simulated data shows a banner ("Simulated data — generated cohort of 60 students over 4 weeks, not real classroom records", counts taken from `GET /api/simulation`). In the Student view the Register number box lists `STU001` and every simulated student; pick `SIM-A01` or type any register number.
 
@@ -195,12 +195,50 @@ The defaults are in the `simulator:` section of `config/classpulse.yaml`: 2 sect
 
 The Admin view opens with feedback for all teachers, then the timetable, manual sessions and recent lectures below it. It reads `GET /api/admin/overview`, which holds totals per teacher and per section and no figure for any individual student.
 
-- **Attention figures with 95% ranges.** One row per teacher, alphabetical and never sorted by a score. Columns: lectures, the plain class average (attentive / (attentive + distracted) from the summed seconds of every record in the teacher's lectures, with the same presence gate; unassigned records are ignored), the self-comparison ("Vs own average") and the slot-adjusted figure as range bars from -10 to +10 points (pale bar is the range, dot is the figure), and marks (a dash until marks are uploaded). Below `teachers.min_lectures` lectures the two figures are replaced by "Figures appear after 5 lectures"; the class average stays. With simulated data a Built-in column shows each teacher's true effect.
+- **Attention figures with 95% ranges.** One row per teacher, alphabetical and never sorted by a score. Columns: lectures, the plain class average (attentive / (attentive + distracted) from the summed seconds of every record in the teacher's lectures, with the same presence gate; unassigned records are ignored), the self-comparison ("Vs own average") and the slot-adjusted figure as range bars from -10 to +10 points (pale bar is the range, dot is the figure), and marks (the marks figure in percentile points, a dash until the teacher has uploaded marks). Below `teachers.min_lectures` lectures the two figures are replaced by "Figures appear after 5 lectures"; the class average stays. With simulated data a Built-in column shows each teacher's true effect.
 - **Attendance by section.** The present rate across each section's lectures and its size, then the number of unassigned record windows (records that matched no lecture).
 - **Does each figure find the built-in best teacher?** Only with simulated data. For each method, the teacher with the highest value, marked "matches" when that is the teacher with the largest built-in effect and "wrong" when it is not. Teachers whose figures are hidden are not named.
 - The slot-adjusted figure cannot separate a teacher from a slot they always teach in, and the page says so. The figures are feedback, not a ranking.
 
 **Demo.** Reseed with `python -m simulator seed` (the data ends on the day it was generated), pick Admin under View as, and read the comparison card. On the default cohort the plain class average and the self-comparison both put Prof. Rahul Bhat first (he teaches only the better section, in the mornings), and the slot-adjusted figure puts Dr. Anita Menon first, the teacher built to be best. On the small cohort (`seed --small`) the plain class average is also wrong and the slot-adjusted figure is right; the self-comparison is wrong there too.
+
+## Marks
+
+Teachers upload the marks of tests they already run, and ClassPulse links them to attention.
+
+**File format.** A CSV (UTF-8) or Excel (.xlsx, first sheet) file with the columns `register_no`, `marks` and `max_marks`; see `samples/marks.csv`. Headers are matched ignoring case, spaces and punctuation, and a few variants are accepted (`Register No`, `Roll No`, `Marks Obtained`, `Score`, `Out of`, `Maximum Marks`, and so on). Other columns are ignored, blank lines are skipped, and a file that starts like a zip archive is read as Excel whatever its name. Register numbers match case-insensitively. A student who was away is simply left out of the file.
+
+**Upload.** In the Teacher view, with the teacher chosen in the sidebar, use Upload marks: choose the file, the subject (the teacher's timetabled subject is preselected), the test date and, if you like, a test name such as "Mid-term 1", then press Upload marks. The test belongs to that teacher. Uploading the same teacher, subject, date and name again replaces that test's marks.
+
+**The upload is all or nothing.** If any row is invalid (an empty or repeated register number, marks that are not numbers, below zero or above `max_marks`, a `max_marks` that is not above zero) or any register number is not a known student, nothing is stored and every problem is listed by line number. Percentiles depend on every row of a test, so storing part of a file would give wrong ones. A file that cannot be read as a whole (missing columns, empty, not UTF-8, a damaged workbook) is refused with a message.
+
+**Percentiles.** A student's score is `marks / max_marks`, so tests out of 50 and out of 100 compare. Within a test, the percentile is the mid-rank percentile, 0 to 100: 100 x (students with a lower score + half the students with the same score, counting the student) / students in the test. Tied students share one value. Five distinct scores give 10, 30, 50, 70 and 90; one student gives 50; the percentiles of a test average exactly 50. The functions are in `backend/marks.py` and are tested against hand-worked numbers in `tests/test_marks_figures.py`.
+
+**Covered lectures.** A test covers every lecture of its subject taught by its teacher to the sections of the students in the test, after the previous test of the same teacher and subject for that section (from the beginning when there is none) up to the test date. Dates are local calendar dates; a lecture on the day of a test counts for that test, and a test on the same date as another is a sibling, not its previous test. Manual sessions with no section are not covered.
+
+**Student groups.** For a chosen test, each student's attention is attentive / (attentive + distracted) over their summed seconds in the covered lectures, with the usual visibility gate: a student in view for less than `scores.min_presence_ratio` of the recorded time, or with no records, is "insufficient data" and is not grouped. Attention "above 60%" means strictly above `marks.attention_line` in `config/classpulse.yaml` (0.60; exactly 60% is at or below), and "marks above the class median" means strictly above the median score of everybody in the test (a score equal to the median is at or below). Each student also gets an attention percentile among the students with a value, kept for reference; the groups use the attention value itself.
+
+| | Marks above class median | Marks at or below median |
+| --- | --- | --- |
+| Attention above 60% | On track | Attentive but struggling |
+| Attention at or below 60% | Knows it already | At risk |
+
+The Student groups card shows the counts in this grid for the chosen test ("At risk" in the Distracted colour) and a "Students in each group" expander that lists the teacher's own students. The Admin view never asks for students.
+
+**The marks figure.** For each student who sat the teacher's tests: the mean of their percentiles in the teacher's tests minus the mean of their percentiles in all the tests they sat (every teacher and subject, the teacher's own included). The figure is the mean of that over those students, with the 95% range from `figure_with_range` and the number of tests. It is shown as "+6 pctl" with "From 2 tests" in the Teacher view and as "+6" in the Marks column of the Admin view. It is hidden (null with the reason "no marks uploaded") for a teacher with no tests, and it does not wait for `teachers.min_lectures`.
+
+*What this can and cannot do.* Percentiles are relative inside a test, so the percentiles of a test average 50 whatever the marks are. If every student sat every test, the figure is exactly zero, and a uniform lift of one teacher's marks changes nothing. The figure moves only when the students who sit one teacher's tests are not the ones who sit the others': students staying away from some tests, or a teacher whose tests are taken by a different mix of students (for example one section). It describes where a teacher's students rank against their own usual place; it is not a measure of how much they learned, and like the other figures it is feedback, not a ranking.
+
+**Simulated marks.** `python -m simulator seed` uploads two tests for every teacher and section pairing (9 pairings, so 18 tests on the default cohort), named like "Mid-term 1 (SIM-A)", dated on the last lecture day of each half of the period, so after the lectures they cover. Test 1 is out of 50 and test 2 out of 100. A mark is the archetype's ability (engaged 82, average 62, struggling 38, disengaged 30, in percent), a personal offset, test noise and the teacher effect `simulator.marks.teacher_points` (8 marks points for the first teacher, Dr. Anita Menon, who is also the built-in best teacher for attention), all seeded. A student whose mark would fall below `skip_below` (35%) stays away from the test with probability `skip_chance` (0.9). That is how the teacher effect reaches the percentiles: fewer of the weaker students skip the better teacher's tests, which raises that teacher's figure. The marks are uploaded through the same endpoint with the simulated flag, and the wipe removes them. A test is also simulated whenever its teacher is.
+
+On the default cohort the "struggling" students (attentive, low marks) land in Attentive but struggling in nearly every grouped test, the engaged ones mostly in On track and the disengaged ones mostly in At risk. The marks figure favours the built-in best teacher on every seed tried (30 of 30), by about +3 to +4 percentile points; on the small cohort (`seed --small`, 12 students) it is too noisy to say.
+
+**Demo.**
+
+1. Start the backend and the dashboard, and run `python -m simulator seed` (it also uploads the marks).
+2. Under View as, choose Teacher and pick Dr. Anita Menon. The Marks vs own percentile card shows the figure and "From N tests". The Student groups card shows the 2 x 2 grid for her newest test; use its picker to change test and open Students in each group to list the students.
+3. To upload your own: in the sidebar choose `samples/marks.csv` under Marks file, check that Subject is Algorithms, choose a Test date and a name such as "Sample", and press Upload marks. A message says how many students were stored, or lists the rows to fix. The new test appears in the Student groups picker.
+4. Choose Admin to see each teacher's marks figure in the Marks column (still no student), and Student with `SIM-A01` to see that student's own marks and percentile for each test. Without marks every view says "No marks yet".
 
 ## Pointing at another backend
 
@@ -249,6 +287,15 @@ Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
 
 - `POST /api/timetable` takes a multipart form with a CSV in the field `file` and an optional `simulated` field (`true` replaces and creates only simulated slots and entities; default `false` touches only live ones). Returns `{"applied", "slots_total", "slots_added", "slots_kept", "slots_removed", "created": {"teachers", "subjects", "rooms", "sections"}, "errors": [{"row", "message"}]}`. `applied` is false when any row is invalid. A file without the required columns, not UTF-8 or empty returns 422.
 - `GET /api/timetable` returns `{"timezone", "slots": [{"id", "day", "day_index", "start", "end", "room", "section", "subject", "teacher"}]}` ordered by day and start.
+
+**Marks** (see Marks above)
+
+- `POST /api/marks/tests` takes a multipart form with a CSV or .xlsx in the field `file`, `teacher_id`, `subject_id`, `test_date` (`YYYY-MM-DD`), an optional `name` and an optional `simulated` flag (a simulated teacher's test is simulated either way). Returns `{"applied", "test_id", "rows", "replaced", "errors": [{"row", "message"}]}`; `applied` is false, with every problem by line, when anything is wrong and nothing was stored. A file that cannot be read, or a bad date or name, returns 422; an unknown teacher or subject 404; a file over 1 MB 413.
+- `GET /api/teachers/{id}/marks/tests` lists that teacher's tests, newest first: `[{"id", "name", "teacher_id", "teacher", "subject_id", "subject", "test_date", "simulated", "n_students", "sections"}]`.
+- `GET /api/marks/tests/{id}/groups` returns `{"test", "attention_line", "median_score", "n_students", "n_covered_lectures", "counts": {"On track", "Attentive but struggling", "Knows it already", "At risk", "Insufficient data"}, "students"}`. `students` is null unless `?students=true`, which only the teacher's own view uses; each student has `register_no`, `name`, `section`, `marks`, `max_marks`, `marks_percentile`, `attention`, `attention_percentile`, `reason` and `group`.
+- `GET /api/students/{register_no}/marks` returns `{"register_no", "simulated", "tests": [{"test_id", "name", "subject", "teacher", "test_date", "marks", "max_marks", "percentile", "n_students"}]}`, newest first, for that student only.
+- Every teacher summary (`GET /api/teachers/{id}/feedback`, `GET /api/teachers/feedback`, `GET /api/admin/overview`) carries `marks`: `{"value", "low", "high", "n_students", "n_tests", "reason"}` in percentile points, with `value` null and `reason` "no marks uploaded" when the teacher has no tests.
+- `DELETE /api/simulation` also removes simulated tests and the marks of simulated tests and simulated students (counts `tests` and `marks`).
 
 **Students and simulation**
 

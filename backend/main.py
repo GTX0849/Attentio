@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -13,14 +13,24 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql.dml import ReturningInsert
 
-from backend import metrics, simulation, student_profile, teacher_feedback, teacher_figures
+from backend import (
+    marks,
+    marks_service,
+    metrics,
+    simulation,
+    student_profile,
+    teacher_feedback,
+    teacher_figures,
+)
 from backend.clock import Clock, resolve_timezone, system_clock
 from backend.db import init_database
 from backend.lectures import MANUAL, LectureResolver
+from backend.marks_file import MarksFileError
 from backend.models import (
     AttentionRecordRow,
     Camera,
     Lecture,
+    MarksTest,
     Room,
     Section,
     Student,
@@ -33,10 +43,13 @@ from backend.schemas import (
     CameraOut,
     CameraRegistration,
     CurrentResponse,
+    GroupsResponse,
     IngestResult,
     LectureOut,
     LiveResponse,
     LiveWindow,
+    MarksTestOut,
+    MarksUploadResult,
     NamedItem,
     ProfileResponse,
     RoomOut,
@@ -46,6 +59,7 @@ from backend.schemas import (
     SimulationSummary,
     SlotOut,
     StudentCreate,
+    StudentMarksResponse,
     StudentOut,
     TeacherFeedback,
     TeacherSummary,
@@ -88,6 +102,7 @@ def create_app(
     window_len = window_seconds if window_seconds is not None else load_config().window_seconds
     min_presence = metrics.min_presence_ratio()
     teacher_settings = teacher_figures.teacher_settings()
+    marks_settings = marks.marks_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -260,6 +275,14 @@ def create_app(
             raise HTTPException(404, f"Unknown student register number: {register_no}")
         return student_profile.build_current(session, register_no, clock(), tz, min_presence)
 
+    @app.get("/api/students/{register_no}/marks")
+    def get_student_marks(register_no: str, session: SessionDep) -> StudentMarksResponse:
+        """This student's own marks and percentile in each test, newest first. Nothing about other students."""
+        student = session.get(Student, register_no)
+        if student is None:
+            raise HTTPException(404, f"Unknown student register number: {register_no}")
+        return marks_service.student_marks(session, student)
+
     # ---- timetable -----------------------------------------------------------
 
     @app.post("/api/timetable")
@@ -360,6 +383,63 @@ def create_app(
         if teacher is None:
             raise HTTPException(404, f"Unknown teacher id: {teacher_id}")
         return teacher_feedback.build_one(session, teacher, clock(), tz, teacher_settings, min_presence)
+
+    # ---- marks ----------------------------------------------------------------------
+
+    @app.post("/api/marks/tests")
+    def upload_marks(
+        session: SessionDep,
+        file: Annotated[UploadFile, File()],
+        teacher_id: Annotated[int, Form()],
+        subject_id: Annotated[int, Form()],
+        test_date: Annotated[date, Form()],
+        name: Annotated[str, Form()] = "",
+        simulated: Annotated[bool, Form()] = False,
+    ) -> MarksUploadResult:
+        """Upload the marks of one test (CSV or .xlsx: register_no, marks, max_marks) for a teacher and subject.
+
+        All or nothing: any invalid row or unknown register number is reported by line and nothing is
+        stored. Uploading the same teacher, subject, date and name again replaces that test's marks.
+        A test is simulated when `simulated` is true or its teacher is.
+        """
+        teacher = session.get(Teacher, teacher_id)
+        if teacher is None:
+            raise HTTPException(404, f"Unknown teacher id: {teacher_id}")
+        subject = session.get(Subject, subject_id)
+        if subject is None:
+            raise HTTPException(404, f"Unknown subject id: {subject_id}")
+        test_name = marks_service.clean_name(name)
+        if len(test_name) > marks_service.MAX_NAME_LENGTH:
+            raise HTTPException(422, f"The test name is longer than {marks_service.MAX_NAME_LENGTH} characters")
+        raw = file.file.read(MAX_UPLOAD_BYTES + 1)
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "The file is larger than 1 MB")
+        request = marks_service.UploadRequest(teacher, subject, test_date, test_name, simulated)
+        try:
+            return marks_service.upload_marks(session, raw, file.filename or "", request)
+        except MarksFileError as e:
+            raise HTTPException(422, str(e)) from e
+
+    @app.get("/api/teachers/{teacher_id}/marks/tests")
+    def list_teacher_tests(teacher_id: int, session: SessionDep) -> list[MarksTestOut]:
+        """The teacher's own tests, newest first."""
+        if session.get(Teacher, teacher_id) is None:
+            raise HTTPException(404, f"Unknown teacher id: {teacher_id}")
+        return marks_service.teacher_tests(session, teacher_id)
+
+    @app.get("/api/marks/tests/{test_id}/groups")
+    def get_marks_groups(
+        test_id: int, session: SessionDep, students: Annotated[bool, Query()] = False
+    ) -> GroupsResponse:
+        """The four student groups of a test (attention over the lectures it covers by marks).
+
+        Counts always; with `students=true` also each student's marks, attention and group, which only
+        the teacher's own view asks for. The admin view never does.
+        """
+        test = session.get(MarksTest, test_id)
+        if test is None:
+            raise HTTPException(404, f"Unknown test id: {test_id}")
+        return marks_service.build_groups(session, test, min_presence, marks_settings, students)
 
     @app.get("/api/lectures/{lecture_id}/timeline")
     def get_lecture_timeline(lecture_id: int, session: SessionDep) -> TimelineResponse:

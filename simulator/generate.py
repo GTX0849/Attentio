@@ -14,6 +14,7 @@ shock and the student's own shock for the lecture. Each 30-second window then sp
 seconds into not visible, neutral, attentive and distracted around that mean.
 """
 
+import math
 import random
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -216,3 +217,91 @@ def all_records(
     students = build_students(config)
     for lecture in lecture_schedule(config, tz, now):
         yield lecture, lecture_records(config, lecture, students)
+
+
+# ---- marks -------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SimTest:
+    """One test for a teacher, subject and section. `date` is the local date of the last lecture it covers."""
+
+    number: int  # 1-based, within the pairing
+    name: str  # "Mid-term 1 (SIM-A)": the section is in the name so the two sections' tests stay apart
+    teacher: str
+    subject: str
+    section: str
+    date: date
+    max_marks: float
+
+    @property
+    def key(self) -> str:
+        return f"{self.teacher}|{self.section}|{self.date.isoformat()}"
+
+
+def marks_schedule(config: SimulatorConfig, tz: ZoneInfo, now: datetime) -> list[SimTest]:
+    """Two tests (by default) for each teacher and section pairing, ordered by date.
+
+    The lecture days are split into `marks.tests_per_pairing` blocks of consecutive days, and each
+    test is dated on the last lecture day of its block, so it is dated after every lecture it
+    covers. A pairing with no lecture in a block gets no test for it.
+    """
+    lectures = lecture_schedule(config, tz, now)
+    days = sorted({x.date for x in lectures})
+    n = config.marks.tests_per_pairing
+    tests: list[SimTest] = []
+    pairings = sorted({(x.slot.teacher, x.slot.subject, x.slot.section) for x in lectures})
+    for k in range(1, n + 1):
+        block = days[math.ceil(len(days) * (k - 1) / n) : math.ceil(len(days) * k / n)]
+        if not block:
+            continue
+        for teacher, subject, section in pairings:
+            if not any(
+                x.slot.teacher == teacher and x.slot.section == section and block[0] <= x.date <= block[-1]
+                for x in lectures
+            ):
+                continue
+            tests.append(
+                SimTest(
+                    number=k,
+                    name=f"Mid-term {k} ({section})",
+                    teacher=teacher,
+                    subject=subject,
+                    section=section,
+                    date=block[-1],
+                    max_marks=config.marks.max_marks[(k - 1) % len(config.marks.max_marks)],
+                )
+            )
+    return sorted(tests, key=lambda t: (t.date, t.teacher, t.section))
+
+
+def marks_for(config: SimulatorConfig, test: SimTest, students: list[SimStudent]) -> list[dict[str, Any]]:
+    """The marks of the section's students who sat the test, as rows of the marks upload."""
+    marks = config.marks
+    offset_teacher = marks.teacher_points if test.teacher == config.teachers[0] else 0.0
+    rows: list[dict[str, Any]] = []
+    for student in students:
+        if student.section != test.section:
+            continue
+        own = _rng(config, "marks-offset", student.register_no).gauss(0, marks.student_sd)
+        rng = _rng(config, "marks", test.key, student.register_no)
+        percent = _clip(
+            marks.ability[student.archetype] + own + offset_teacher + rng.gauss(0, marks.test_sd), 0.0, 100.0
+        )
+        if percent < marks.skip_below and rng.random() < marks.skip_chance:
+            continue  # expected to fail, stays away
+        rows.append(
+            {
+                "register_no": student.register_no,
+                "marks": round(percent / 100 * test.max_marks, 1),
+                "max_marks": test.max_marks,
+            }
+        )
+    return rows
+
+
+def marks_csv(rows: list[dict[str, Any]]) -> bytes:
+    """The rows as the CSV the marks upload takes."""
+    lines = ["register_no,marks,max_marks"]
+    lines += [f"{r['register_no']},{r['marks']:g},{r['max_marks']:g}" for r in rows]
+    return ("\n".join(lines) + "\n").encode()

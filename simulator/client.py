@@ -20,9 +20,13 @@ import requests
 
 from simulator.config import SimulatorConfig
 from simulator.generate import (
+    SimStudent,
     build_students,
     lecture_records,
     lecture_schedule,
+    marks_csv,
+    marks_for,
+    marks_schedule,
     true_effects,
 )
 from simulator.timetable import camera_for, room_for, timetable_csv
@@ -65,6 +69,8 @@ class SeedReport:
     lectures: int
     records: int
     seconds: float
+    tests: int = 0  # marks tests uploaded
+    marks: int = 0  # marks in them
 
 
 def wipe(backend: Backend) -> dict[str, int]:
@@ -135,9 +141,48 @@ def seed(
         if number % 20 == 0 or number == len(lectures):
             elapsed = time.monotonic() - started
             progress(f"Sent {number} of {len(lectures)} lectures, {sent} records ({elapsed:.0f} s)")
+    tests, marks = upload_marks(backend, config, students, tz, moment, progress)
     return SeedReport(
         students=len(students),
         lectures=len(lectures),
         records=sent,
         seconds=time.monotonic() - started,
+        tests=tests,
+        marks=marks,
     )
+
+
+def upload_marks(
+    backend: Backend,
+    config: SimulatorConfig,
+    students: list[SimStudent],
+    tz: ZoneInfo,
+    moment: datetime,
+    progress: Callable[[str], None],
+) -> tuple[int, int]:
+    """Upload the simulated tests through the marks endpoint (flagged simulated). Returns (tests, marks)."""
+    teachers = {t["name"]: t["id"] for t in backend.call("GET", "/api/teachers")}
+    subjects = {s["name"]: s["id"] for s in backend.call("GET", "/api/subjects")}
+    tests = marks_schedule(config, tz, moment)
+    total = 0
+    for test in tests:
+        rows = marks_for(config, test, students)
+        if not rows:
+            continue
+        result = backend.call(
+            "POST",
+            "/api/marks/tests",
+            files={"file": (f"{test.name}.csv", marks_csv(rows), "text/csv")},
+            data={
+                "teacher_id": teachers[test.teacher],
+                "subject_id": subjects[test.subject],
+                "test_date": test.date.isoformat(),
+                "name": test.name,
+                "simulated": "true",
+            },
+        )
+        if not result["applied"]:
+            raise SimulatorError(f"The marks of {test.name} for {test.teacher} were rejected: {result['errors']}")
+        total += result["rows"]
+    progress(f"Uploaded {len(tests)} tests ({total} marks)")
+    return len(tests), total

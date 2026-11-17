@@ -179,6 +179,7 @@ def feedback_section(config: Config, simulation: dict[str, Any] | None) -> None:
     effects = simulation["effects"] if simulation is not None else None
     st.html(admin_figures.figures_table_html(overview, effects))
     st.caption(admin_figures.NOTE)
+    st.caption(admin_figures.MARKS_NOTE if admin_figures.any_marks(overview["teachers"]) else admin_figures.NO_MARKS)
     left, right = st.columns([1, 1.4])
     with left:
         st.html(admin_figures.attendance_card_html(overview))

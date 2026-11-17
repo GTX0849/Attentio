@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from backend.lectures import MANUAL
+from backend.marks import NO_TESTS, MarksFigure
 from backend.metrics import AttentionFigure
 from backend.models import Lecture, Student, TimetableSlot
 from backend.teacher_figures import Figure as TeacherFigure
@@ -323,6 +324,8 @@ class WipeResult(BaseModel):
     rooms: int
     cameras: int
     effects: int
+    tests: int = 0  # marks tests removed
+    marks: int = 0  # marks removed
 
 
 # ---- teacher feedback ------------------------------------------------------------------------
@@ -358,6 +361,34 @@ class TeacherAttendance(BaseModel):
     rate: float | None  # present / expected over the teacher's lectures; None with no lectures
 
 
+class MarksFigureOut(BaseModel):
+    """The marks-based figure in percentile points (see backend/marks.py), with its range.
+
+    `value` is None, with a `reason`, when the teacher has no tests. `n_tests` is the number of the
+    teacher's tests it is from and `n_students` the number of students who sat them.
+    """
+
+    value: float | None
+    low: float | None
+    high: float | None
+    n_students: int
+    n_tests: int
+    reason: str | None
+
+    @classmethod
+    def from_figure(cls, figure: MarksFigure | None) -> "MarksFigureOut":
+        if figure is None:
+            return cls(value=None, low=None, high=None, n_students=0, n_tests=0, reason=NO_TESTS)
+        return cls(
+            value=figure.value,
+            low=figure.low,
+            high=figure.high,
+            n_students=figure.n_students,
+            n_tests=figure.n_tests,
+            reason=None,
+        )
+
+
 class TeacherSummary(BaseModel):
     teacher_id: int
     teacher: str
@@ -368,6 +399,7 @@ class TeacherSummary(BaseModel):
     class_average: float | None  # plain attention (0 to 1) over all seconds in the teacher's lectures; kept while hidden
     self_comparison: TeacherFigureOut  # the teacher's students against their own average, points
     slot_adjusted: TeacherFigureOut  # the same after removing each time slot's average effect
+    marks: MarksFigureOut  # the marks-based figure; independent of the lecture count
     attendance: TeacherAttendance
 
 
@@ -420,3 +452,76 @@ class TimelineResponse(BaseModel):
     lecture: LectureOut
     window_seconds: int
     points: list[TimelinePoint]  # only windows that have records, oldest first
+
+
+# ---- marks -------------------------------------------------------------------------------------------
+
+
+class MarksUploadResult(BaseModel):
+    """The outcome of a marks upload. All or nothing: with any problem, nothing is stored."""
+
+    applied: bool
+    test_id: int | None  # the test created or replaced; None when nothing was stored
+    rows: int  # marks stored
+    replaced: bool  # the upload replaced the marks of a test that already existed
+    errors: list[RowErrorOut]  # by line number, every problem at once
+
+
+class MarksTestOut(BaseModel):
+    id: int
+    name: str  # "" when the teacher gave none
+    teacher_id: int
+    teacher: str
+    subject_id: int
+    subject: str
+    test_date: date
+    simulated: bool
+    n_students: int  # students with marks in the test
+    sections: list[str]  # sections of those students, by name
+
+
+class GroupedStudentOut(BaseModel):
+    """One student of a test: marks, attention over the covered lectures and the group (teacher view only)."""
+
+    register_no: str
+    name: str | None
+    section: str | None
+    marks: float
+    max_marks: float
+    marks_percentile: float
+    attention: float | None  # None, with a `reason`, for insufficient data
+    attention_percentile: float | None
+    reason: str | None
+    group: str | None
+
+
+class GroupsResponse(BaseModel):
+    """The four student groups of one test. `students` is only filled when asked for."""
+
+    test: MarksTestOut
+    attention_line: float  # attention strictly above this counts as attentive (0 to 1)
+    median_score: float | None  # median marks as a share of the maximum; None for an empty test
+    n_students: int
+    n_covered_lectures: int  # lectures the test covers
+    counts: dict[str, int]  # every group name, and "Insufficient data"
+    students: list[GroupedStudentOut] | None
+
+
+class StudentMarkRow(BaseModel):
+    test_id: int
+    name: str
+    subject: str
+    teacher: str
+    test_date: date
+    marks: float
+    max_marks: float
+    percentile: float  # within the test, 0 to 100
+    n_students: int  # how many students sat the test
+
+
+class StudentMarksResponse(BaseModel):
+    """A student's own marks, newest test first. Nothing about any other student's marks."""
+
+    register_no: str
+    simulated: bool
+    tests: list[StudentMarkRow]

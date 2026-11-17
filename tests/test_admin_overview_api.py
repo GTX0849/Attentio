@@ -148,7 +148,7 @@ ALLOWED_KEYS = {
     "teachers", "sections", "unassigned_windows", "min_lectures", "range_level", "timezone", "now",
     "teacher_id", "teacher", "simulated", "n_lectures", "hidden", "reason", "class_average",
     "self_comparison", "slot_adjusted", "value", "low", "high", "n_students", "attendance",
-    "present", "expected", "rate", "section_id", "section",
+    "present", "expected", "rate", "section_id", "section", "marks", "n_tests",
 }  # fmt: skip
 
 

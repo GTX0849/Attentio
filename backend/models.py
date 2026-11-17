@@ -162,6 +162,41 @@ class AttentionRecordRow(Base):
     lecture: Mapped[Lecture | None] = relationship()
 
 
+class MarksTest(Base):
+    """One test a teacher ran and uploaded marks for. It belongs to that teacher and subject.
+
+    The same teacher, subject, date and name (with the same simulated flag) is one test:
+    uploading it again replaces its marks. `name` is "" when the teacher gave none.
+    """
+
+    __tablename__ = "marks_tests"
+    __table_args__ = (UniqueConstraint("teacher_id", "subject_id", "test_date", "name", "simulated"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id"))
+    subject_id: Mapped[int] = mapped_column(ForeignKey("subjects.id"))
+    test_date: Mapped[date] = mapped_column(Date)  # local calendar date of the test
+    name: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    simulated: Mapped[bool] = _simulated_flag()
+
+    teacher: Mapped[Teacher] = relationship(lazy="joined")
+    subject: Mapped[Subject] = relationship(lazy="joined")
+
+
+class Mark(Base):
+    """One student's marks in one test, with their percentile within that test (see backend/marks.py)."""
+
+    __tablename__ = "marks"
+    __table_args__ = (UniqueConstraint("test_id", "student_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    test_id: Mapped[int] = mapped_column(ForeignKey("marks_tests.id", ondelete="CASCADE"), index=True)
+    student_id: Mapped[str] = mapped_column(ForeignKey("students.register_no"), index=True)
+    marks: Mapped[float] = mapped_column(Float)
+    max_marks: Mapped[float] = mapped_column(Float)
+    percentile: Mapped[float] = mapped_column(Float)  # 0 to 100, mid-rank within the test
+
+
 class SimulationEffect(Base):
     """A built-in effect of the loaded simulation, in attention points (percentage points).
 

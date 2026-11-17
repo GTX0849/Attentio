@@ -12,5 +12,5 @@ check_untyped_defs = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["cv2", "cv2.*", "mediapipe", "mediapipe.*", "altair", "altair.*"]
+module = ["cv2", "cv2.*", "mediapipe", "mediapipe.*", "altair", "altair.*", "openpyxl", "openpyxl.*"]
 ignore_missing_imports = true

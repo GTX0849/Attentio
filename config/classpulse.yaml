@@ -30,6 +30,10 @@ teachers:
   min_lectures: 5                # a teacher's figures stay hidden until they have this many lectures with records
   range_level: 0.95              # the range shown around each figure (0.95 is mean +/- 1.96 standard errors)
 
+# Marks and student groups (backend/marks.py).
+marks:
+  attention_line: 0.60           # attention strictly above this is "attentive" in the four student groups
+
 # Real readings from the webcam (worker/perception.py, worker/mediapipe_source.py).
 perception:
   calibration_seconds: 3         # at launch (and on recalibrate) the person looks at the screen this long
@@ -75,6 +79,25 @@ simulator:
     average:      {share: 0.26, baseline: 0.70, absent: 0.05, hidden: 0.03}
     struggling:   {share: 0.17, baseline: 0.78, absent: 0.04, hidden: 0.02}
     disengaged:   {share: 0.23, baseline: 0.42, absent: 0.15, hidden: 0.08}
+  # Marks (simulator/generate.py). Each subject is tested twice for every section and teacher
+  # pairing, at the end of each half of the lecture days, and the marks are uploaded through the
+  # marks endpoint (simulated). A mark is ability + personal offset + teacher points + test noise,
+  # in percent of the maximum. A student whose mark would fall below skip_below stays away from the
+  # test with probability skip_chance, which is how a better teacher gets more of the weaker
+  # students to sit the test (the only thing percentiles within a test can show; see README).
+  marks:
+    tests_per_pairing: 2
+    max_marks: [50, 100]         # out of; test 1 is out of 50, test 2 out of 100, then it repeats
+    ability:                     # mean mark by archetype, percent of the maximum
+      engaged: 82
+      average: 62
+      struggling: 38             # attentive, but low marks
+      disengaged: 30
+    student_sd: 5                # sd of a student's own offset from their archetype's ability
+    test_sd: 7                   # sd of one student's mark in one test
+    teacher_points: 8            # added to every mark in the first teacher's tests
+    skip_below: 35               # a mark below this percent may be skipped
+    skip_chance: 0.9             # chance that a student with a mark below skip_below stays away
   small:                         # --small, for tests and quick looks
     weeks: 1
     students_per_section: 6

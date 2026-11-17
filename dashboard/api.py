@@ -1,5 +1,6 @@
 """The dashboard's only data source: HTTP calls to the backend (never the database)."""
 
+from datetime import date
 from typing import Any
 
 import requests
@@ -17,10 +18,11 @@ def _call(
     params: dict[str, Any] | None = None,
     json: Any = None,
     files: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> Any:
     url = f"{backend_url.rstrip('/')}{path}"
     try:
-        resp = requests.request(method, url, params=params, json=json, files=files, timeout=10)
+        resp = requests.request(method, url, params=params, json=json, files=files, data=data, timeout=10)
     except requests.RequestException as e:
         raise BackendError(f"Cannot reach the backend at {backend_url}: {e}") from e
     if not resp.ok:
@@ -55,6 +57,12 @@ def get_student_current(backend_url: str, register_no: str) -> dict[str, Any]:
 def get_student_profile(backend_url: str, register_no: str) -> dict[str, Any]:
     """Semester breakdowns, weekly trend and attendance. See GET /api/students/{id}/profile."""
     body: dict[str, Any] = _call(backend_url, "GET", f"/api/students/{register_no}/profile")
+    return body
+
+
+def get_student_marks(backend_url: str, register_no: str) -> dict[str, Any]:
+    """The student's own marks and percentile in each test, newest first. See GET /api/students/{id}/marks."""
+    body: dict[str, Any] = _call(backend_url, "GET", f"/api/students/{register_no}/marks")
     return body
 
 
@@ -169,4 +177,49 @@ def start_session(
 
 def stop_session(backend_url: str, session_id: int) -> dict[str, Any]:
     body: dict[str, Any] = _call(backend_url, "POST", f"/api/sessions/{session_id}/stop")
+    return body
+
+
+def upload_marks(
+    backend_url: str,
+    teacher_id: int,
+    subject_id: int,
+    test_date: date,
+    name: str,
+    filename: str,
+    content: bytes,
+) -> dict[str, Any]:
+    """Upload the marks of one test (CSV or .xlsx). See POST /api/marks/tests.
+
+    `applied` is false, with the bad rows in `errors`, when nothing was stored.
+    """
+    body: dict[str, Any] = _call(
+        backend_url,
+        "POST",
+        "/api/marks/tests",
+        files={"file": (filename, content, "application/octet-stream")},
+        data={
+            "teacher_id": teacher_id,
+            "subject_id": subject_id,
+            "test_date": test_date.isoformat(),
+            "name": name,
+        },
+    )
+    return body
+
+
+def list_teacher_marks_tests(backend_url: str, teacher_id: int) -> list[dict[str, Any]]:
+    """The teacher's own tests, newest first. See GET /api/teachers/{id}/marks/tests."""
+    tests: list[dict[str, Any]] = _call(backend_url, "GET", f"/api/teachers/{teacher_id}/marks/tests")
+    return tests
+
+
+def get_marks_groups(backend_url: str, test_id: int) -> dict[str, Any]:
+    """The four student groups of a test, with the students (the teacher's own view).
+
+    See GET /api/marks/tests/{id}/groups.
+    """
+    body: dict[str, Any] = _call(
+        backend_url, "GET", f"/api/marks/tests/{test_id}/groups", params={"students": "true"}
+    )
     return body

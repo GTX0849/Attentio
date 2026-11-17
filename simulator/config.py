@@ -22,6 +22,20 @@ class Archetype:
 
 
 @dataclass(frozen=True)
+class MarksSimConfig:
+    """How the simulator makes marks: tests per section and teacher, size and the built-in teacher effect."""
+
+    tests_per_pairing: int
+    max_marks: tuple[float, ...]  # out of, by test number (repeats)
+    ability: dict[str, float]  # archetype -> mean mark, percent of the maximum
+    student_sd: float
+    test_sd: float
+    teacher_points: float  # added to every mark in the first teacher's tests
+    skip_below: float  # a mark (percent) below this may be skipped ...
+    skip_chance: float  # ... with this probability
+
+
+@dataclass(frozen=True)
 class SimulatorConfig:
     weeks: int
     seed: int
@@ -39,6 +53,7 @@ class SimulatorConfig:
     lecture_noise: float
     neutral_share: float
     archetypes: tuple[Archetype, ...]
+    marks: MarksSimConfig
 
 
 def load_simulator_config(small: bool = False) -> SimulatorConfig:
@@ -75,9 +90,23 @@ def load_simulator_config(small: bool = False) -> SimulatorConfig:
             )
             for name, a in raw["archetypes"].items()
         ),
+        marks=_marks(raw["marks"]),
     )
     validate(config)
     return config
+
+
+def _marks(raw: dict[str, Any]) -> MarksSimConfig:
+    return MarksSimConfig(
+        tests_per_pairing=int(raw["tests_per_pairing"]),
+        max_marks=tuple(float(x) for x in raw["max_marks"]),
+        ability={str(k): float(v) for k, v in raw["ability"].items()},
+        student_sd=float(raw["student_sd"]),
+        test_sd=float(raw["test_sd"]),
+        teacher_points=float(raw["teacher_points"]),
+        skip_below=float(raw["skip_below"]),
+        skip_chance=float(raw["skip_chance"]),
+    )
 
 
 def validate(config: SimulatorConfig) -> None:
@@ -89,3 +118,8 @@ def validate(config: SimulatorConfig) -> None:
         raise ValueError("weeks and students_per_section must be at least 1")
     if abs(sum(a.share for a in config.archetypes) - 1.0) > 1e-6:
         raise ValueError("the archetype shares must add up to 1")
+    if config.marks.tests_per_pairing < 1 or not config.marks.max_marks or min(config.marks.max_marks) <= 0:
+        raise ValueError("marks needs at least one test per pairing and positive maximum marks")
+    missing = [a.name for a in config.archetypes if a.name not in config.marks.ability]
+    if missing:
+        raise ValueError(f"marks.ability has no value for the archetype(s): {', '.join(missing)}")

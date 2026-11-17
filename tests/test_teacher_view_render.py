@@ -171,7 +171,7 @@ def test_recent_lectures_and_the_two_placeholders_for_marks(teacher_data: dict[s
     assert frame.iloc[0].tolist() == ["Tue 10 Nov, 10:00", "A", "29 of 30", "74.2%"]
     assert frame.iloc[1].tolist() == ["Mon 9 Nov, 14:00", "B", "28 of 30", "73.2%"]
     captions = [c.value for c in at.caption]
-    assert "Upload marks to see student groups" in captions
+    assert teacher.NO_GROUPS in captions
     assert "The slot-adjusted figure cannot separate you from a slot you always teach in." in captions
 
 
@@ -215,7 +215,7 @@ def test_a_teacher_with_no_lectures_gets_plain_empty_states(
     assert "Teacher · Dr Rao" in page and "Feedback on your lectures" in page
     assert "No lectures with records yet" in page
     assert page.count("Figures appear after 5 lectures") == 2
-    assert "Upload marks to see student groups" in [c.value for c in at.caption]
+    assert teacher.NO_GROUPS in [c.value for c in at.caption]
     assert "No marks uploaded yet" in page
     infos = [i.value for i in at.info]
     assert infos.count(teacher.NO_LECTURES) >= 2  # the chart and the table

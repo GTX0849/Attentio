@@ -164,9 +164,11 @@ NO_TEACHER_FEEDBACK = {
     "reason": "fewer than 5 lectures",
     "self_comparison": {"value": None, "low": None, "high": None, "n_students": 0},
     "slot_adjusted": {"value": None, "low": None, "high": None, "n_students": 0},
+    "marks": {"value": None, "low": None, "high": None, "n_students": 0, "n_tests": 0, "reason": "no marks uploaded"},
     "attendance": {"present": 0, "expected": 0, "rate": None},
     "lectures": [],
 }
+NO_STUDENT_MARKS = {"register_no": "STU001", "simulated": False, "tests": []}
 
 
 EMPTY_OVERVIEW = {
@@ -183,7 +185,7 @@ EMPTY_OVERVIEW = {
 @pytest.fixture
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Replace the dashboard's HTTP calls; the returned dict records what was sent."""
-    calls: dict[str, list[Any]] = {"upload": [], "start": [], "stop": []}
+    calls: dict[str, list[Any]] = {"upload": [], "start": [], "stop": [], "marks": []}
     open_sessions: list[dict[str, Any]] = [LECTURE]
 
     monkeypatch.setattr(api, "get_timetable", lambda url: {"timezone": "Asia/Kolkata", "slots": [SLOT]})
@@ -220,6 +222,8 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     monkeypatch.setattr(api, "get_admin_overview", lambda url: EMPTY_OVERVIEW)
     monkeypatch.setattr(api, "get_teacher_feedback", lambda url, teacher_id: NO_TEACHER_FEEDBACK)
     monkeypatch.setattr(api, "get_lecture_timeline", lambda url, lecture_id: {"points": []})
+    monkeypatch.setattr(api, "list_teacher_marks_tests", lambda url, teacher_id: [])
+    monkeypatch.setattr(api, "get_student_marks", lambda url, register_no: NO_STUDENT_MARKS)
     monkeypatch.setattr(student, "get_live", lambda url, reg, minutes: [])
     monkeypatch.setattr(student, "get_current", lambda url, reg: NO_CURRENT)
     monkeypatch.setattr(student, "get_profile", lambda url, reg: NO_PROFILE)
@@ -289,6 +293,7 @@ def test_student_view_with_data_shows_header_cards_and_charts(
         "Seconds in each state, per 30-second window",
         "Attention by subject",
         "Weekly attention this semester",
+        "Marks",
     ]
     captions = [c.value for c in at.caption]
     assert "Last 15 minutes · each column is one record sent by the worker" in captions
