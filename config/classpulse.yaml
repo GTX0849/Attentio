@@ -1,0 +1,11 @@
+# Shared configuration for worker, backend and dashboard.
+# Later tickets add thresholds (state rules etc.) to this file.
+worker:
+  target_fps: 10        # frames processed per second
+  window_seconds: 30    # length of one attention record window
+
+backend:
+  url: http://127.0.0.1:8000   # where the worker and dashboard reach the backend
+
+dashboard:
+  refresh_seconds: 10

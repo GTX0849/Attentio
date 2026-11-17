@@ -1,0 +1,16 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["shared", "worker", "backend", "dashboard", "simulator", "tests"]
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_return_any = true
+check_untyped_defs = true
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["cv2", "cv2.*", "mediapipe", "mediapipe.*", "altair", "altair.*"]
+ignore_missing_imports = true
