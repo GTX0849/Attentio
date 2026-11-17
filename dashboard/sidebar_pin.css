@@ -1,0 +1,18 @@
+/* Pins the keyed "states_legend" container to the bottom of the sidebar. */
+[data-testid="stSidebarUserContent"] {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+[data-testid="stSidebarUserContent"] > div {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+[data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] {
+  flex: 1 1 auto;
+}
+[data-testid="stLayoutWrapper"]:has(> .st-key-states_legend) {
+  margin-top: auto;
+}

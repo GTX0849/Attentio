@@ -1,0 +1,11 @@
+[theme]
+base = "light"
+primaryColor = "#1B5FD0"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F4F1"
+textColor = "#18212B"
+borderColor = "#DFE2DD"
+font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
+# The four attention states, in the order Attentive, Neutral, Distracted, Not visible.
+chartCategoricalColors = ["#1B5FD0", "#9DB3D6", "#D4622A", "#C9CDD2"]

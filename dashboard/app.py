@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st  # noqa: E402
 
+from dashboard.sidebar import render_sidebar  # noqa: E402
 from dashboard.views import admin, student, teacher  # noqa: E402
 from shared.config import load_config  # noqa: E402
 
@@ -17,8 +18,5 @@ VIEWS = {"Student": student, "Teacher": teacher, "Admin": admin}
 st.set_page_config(page_title="ClassPulse", layout="wide")
 config = load_config()
 
-with st.sidebar:
-    st.header("ClassPulse")
-    role = st.segmented_control("Role", list(VIEWS), default="Student", key="role") or "Student"
-
+role = render_sidebar(config)
 VIEWS[role].render(config)

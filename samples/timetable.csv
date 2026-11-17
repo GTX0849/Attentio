@@ -1,0 +1,14 @@
+day,start,end,room,section,subject,teacher
+Mon,09:00,09:50,R101,CSE-A,Mathematics,Dr Rao
+Mon,10:00,10:50,R101,CSE-A,Physics,Dr Iyer
+Mon,11:00,11:50,R101,CSE-A,Programming,Ms Khan
+Tue,09:00,09:50,R101,CSE-A,Programming,Ms Khan
+Tue,10:00,10:50,R101,CSE-A,Mathematics,Dr Rao
+Wed,09:00,09:50,R101,CSE-A,Physics,Dr Iyer
+Wed,10:00,10:50,R101,CSE-A,Mathematics,Dr Rao
+Thu,09:00,09:50,R101,CSE-A,Programming,Ms Khan
+Thu,14:00,14:50,R101,CSE-A,Physics,Dr Iyer
+Fri,09:00,09:50,R101,CSE-A,Mathematics,Dr Rao
+Fri,10:00,10:50,R101,CSE-A,Programming,Ms Khan
+Mon,09:00,09:50,R102,CSE-B,Physics,Dr Iyer
+Mon,10:00,10:50,R102,CSE-B,Mathematics,Dr Rao
