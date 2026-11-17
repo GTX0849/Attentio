@@ -22,13 +22,18 @@ class Config:
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+BACKEND_URL_ENV = "CLASSPULSE_BACKEND_URL"
+
+
 def load_config(path: Path = CONFIG_PATH) -> Config:
+    """The shared config. CLASSPULSE_BACKEND_URL, when set, replaces `backend.url`."""
     with open(path, encoding="utf-8") as f:
         raw: dict[str, Any] = yaml.safe_load(f)
+    backend_url = _env(BACKEND_URL_ENV) or str(raw["backend"]["url"])
     return Config(
         target_fps=int(raw["worker"]["target_fps"]),
         window_seconds=int(raw["worker"]["window_seconds"]),
-        backend_url=str(raw["backend"]["url"]).rstrip("/"),
+        backend_url=backend_url.rstrip("/"),
         dashboard_refresh_seconds=int(raw["dashboard"]["refresh_seconds"]),
         raw=raw,
     )

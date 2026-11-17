@@ -22,6 +22,7 @@ import streamlit as st
 from dashboard.api import BackendError, get_live
 from dashboard.api import get_student_current as get_current
 from dashboard.api import get_student_profile as get_profile
+from dashboard.simulation import show_banner
 from dashboard.theme import (
     PRIMARY,
     SECONDARY_TEXT,
@@ -343,6 +344,8 @@ def live_view(config: Config, register_no: str) -> None:
         st.error(str(e))
         return
     tz = ZoneInfo(current["timezone"])
+    if current.get("simulated"):
+        show_banner(config)
 
     left, right = st.columns([4, 1])
     with left:

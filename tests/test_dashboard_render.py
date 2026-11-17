@@ -56,6 +56,23 @@ def figure(
     }
 
 
+STUDENT = {
+    "register_no": "STU001",
+    "name": "Demo Student",
+    "section": None,
+    "simulated": False,
+    "archetype": None,
+}
+SIM_STUDENT = {
+    "register_no": "SIM-A01",
+    "name": "Aarav Sharma",
+    "section": "SIM-A",
+    "simulated": True,
+    "archetype": "engaged",
+}
+SIMULATION = {"students": 60, "weeks": 4, "teachers": 5, "sections": ["SIM-A", "SIM-B"], "effects": []}
+BANNER = "Simulated data — generated cohort of 60 students over 4 weeks, not real classroom records"
+
 DS_LECTURE = {
     **LECTURE,
     "id": 9,
@@ -143,6 +160,8 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     monkeypatch.setattr(api, "get_timetable", lambda url: {"timezone": "Asia/Kolkata", "slots": [SLOT]})
     monkeypatch.setattr(api, "list_rooms", lambda url: [{"id": "R101", "cameras": ["CAM1"]}])
     monkeypatch.setattr(api, "list_teachers", lambda url: [{"id": 1, "name": "Dr Rao"}])
+    monkeypatch.setattr(api, "get_simulation", lambda url: None)
+    monkeypatch.setattr(api, "list_students", lambda url: [STUDENT])
     monkeypatch.setattr(api, "list_subjects", lambda url: [{"id": 1, "name": "Mathematics"}])
     monkeypatch.setattr(api, "list_sections", lambda url: [{"id": 1, "name": "CSE-A"}])
     monkeypatch.setattr(api, "list_lectures", lambda url, limit=20: [LECTURE])
@@ -311,7 +330,7 @@ def test_sidebar_has_the_role_switcher_and_the_states_legend(
     page = html_of(at)
     for name, description in theme.STATE_DESCRIPTIONS.items():
         assert name in page and description in page
-    assert at.sidebar.text_input(key="student_register_no").value == "STU001"
+    assert at.sidebar.selectbox(key="student_register_no").value == "STU001"
 
 
 def test_admin_view_shows_timetable_sessions_and_lectures(
@@ -384,3 +403,78 @@ def test_theme_helpers_use_the_design_colours_and_escape_text() -> None:
     banner = theme.simulated_banner_html("Simulated data")
     assert "#FFF4DA" in banner and "#7A4E00" in banner
     assert list(theme.STATE_COLOURS.values()) == ["#1B5FD0", "#9DB3D6", "#D4622A", "#C9CDD2"]
+
+
+# ---- simulated data -----------------------------------------------------------------------------------
+
+
+def test_the_banner_names_the_cohort_from_the_simulation_endpoint() -> None:
+    from dashboard.simulation import FALLBACK, banner_text
+
+    assert banner_text(SIMULATION) == BANNER
+    assert banner_text({**SIMULATION, "students": 12, "weeks": 1}) == (
+        "Simulated data — generated cohort of 12 students over 1 week, not real classroom records"
+    )
+    assert banner_text(None) == FALLBACK
+
+
+def test_the_student_sidebar_offers_live_and_simulated_students_and_any_typed_number(
+    fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api, "list_students", lambda url: [STUDENT, SIM_STUDENT])
+    at = run_app()
+    box = at.sidebar.selectbox(key="student_register_no")
+    assert box.options == ["STU001 · Demo Student", "SIM-A01 · Aarav Sharma · SIM-A"]
+    assert box.value == "STU001"
+    box.select("SIM-A01").run()
+    assert not at.exception
+    assert "Student · SIM-A01" in html_of(at)
+
+
+def test_a_simulated_student_shows_the_banner_and_a_live_one_does_not(
+    fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api, "get_simulation", lambda url: SIMULATION)
+    monkeypatch.setattr(api, "list_students", lambda url: [STUDENT, SIM_STUDENT])
+    fake_student(monkeypatch, {**CURRENT, "simulated": True}, PROFILE, [window(DS_LECTURE)])
+    at = run_app()
+    at.sidebar.selectbox(key="student_register_no").select("SIM-A01").run()
+    assert not at.exception
+    page = html_of(at)
+    assert BANNER in page
+    assert page.index(BANNER) < page.index("Your attention, live")  # at the top
+
+    fake_student(monkeypatch, {**CURRENT, "simulated": False}, PROFILE, [window(DS_LECTURE)])
+    at = run_app()
+    assert "Simulated data" not in html_of(at)
+
+
+def test_the_admin_view_shows_the_banner_while_a_simulation_is_loaded(
+    fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    at = run_app()
+    at.session_state["role"] = "Admin"
+    at.run()
+    assert "Simulated data" not in html_of(at)
+
+    monkeypatch.setattr(api, "get_simulation", lambda url: SIMULATION)
+    at = run_app()
+    at.session_state["role"] = "Admin"
+    at.run()
+    assert BANNER in html_of(at)
+
+
+def test_the_teacher_view_shows_the_banner_for_a_simulated_teacher(
+    fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api, "get_simulation", lambda url: SIMULATION)
+    monkeypatch.setattr(
+        api, "list_teachers", lambda url: [{"id": 1, "name": "Dr Rao"}, {"id": 2, "name": "Dr Sim", "simulated": True}]
+    )
+    at = run_app()
+    at.session_state["role"] = "Teacher"
+    at.run()
+    at.sidebar.selectbox(key="teacher_name").select("Dr Rao").run()
+    assert "Simulated data" not in html_of(at)
+    at.sidebar.selectbox(key="teacher_name").select("Dr Sim").run()
+    assert BANNER in html_of(at)

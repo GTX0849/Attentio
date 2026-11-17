@@ -1,12 +1,13 @@
 """Request and response shapes of the REST API."""
 
 from datetime import UTC, date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from backend.lectures import MANUAL
 from backend.metrics import AttentionFigure
-from backend.models import Lecture, TimetableSlot
+from backend.models import Lecture, Student, TimetableSlot
 from backend.timetable import DAYS, format_time
 
 
@@ -31,6 +32,7 @@ class LectureOut(BaseModel):
     start: datetime
     end: datetime | None  # None while a manual session is open
     open: bool  # an open manual session
+    simulated: bool  # made from simulated data
 
     @classmethod
     def from_row(cls, row: Lecture) -> "LectureOut":
@@ -47,6 +49,7 @@ class LectureOut(BaseModel):
             start=row.starts_at.astimezone(UTC),
             end=row.ends_at.astimezone(UTC) if row.ends_at else None,
             open=row.source == MANUAL and row.ends_at is None,
+            simulated=row.simulated,
         )
 
 
@@ -63,6 +66,7 @@ class LiveWindow(BaseModel):
 
 class LiveResponse(BaseModel):
     register_no: str
+    simulated: bool  # the student is simulated
     minutes: int
     windows: list[LiveWindow]  # oldest first
 
@@ -70,15 +74,18 @@ class LiveResponse(BaseModel):
 class NamedItem(BaseModel):
     id: int
     name: str
+    simulated: bool = False
 
 
 class RoomOut(BaseModel):
     id: str
     cameras: list[str]
+    simulated: bool = False
 
 
 class CameraRegistration(BaseModel):
     room_id: str = Field(min_length=1)
+    simulated: bool = False  # flags a camera (and a room) created by this call
 
 
 class CameraOut(BaseModel):
@@ -86,6 +93,33 @@ class CameraOut(BaseModel):
     room_id: str
     camera_created: bool
     room_created: bool
+    simulated: bool = False
+
+
+class StudentCreate(BaseModel):
+    register_no: str = Field(min_length=1, max_length=40)
+    name: str | None = Field(default=None, max_length=120)
+    section: str | None = Field(default=None, min_length=1, max_length=60)  # created if new
+    simulated: bool = False
+    archetype: str | None = Field(default=None, max_length=40)
+
+
+class StudentOut(BaseModel):
+    register_no: str
+    name: str | None
+    section: str | None
+    simulated: bool
+    archetype: str | None
+
+    @classmethod
+    def from_row(cls, row: Student) -> "StudentOut":
+        return cls(
+            register_no=row.register_no,
+            name=row.name,
+            section=row.section.name if row.section else None,
+            simulated=row.simulated,
+            archetype=row.archetype,
+        )
 
 
 class SlotOut(BaseModel):
@@ -98,6 +132,7 @@ class SlotOut(BaseModel):
     section: str
     subject: str
     teacher: str
+    simulated: bool = False
 
     @classmethod
     def from_row(cls, row: TimetableSlot) -> "SlotOut":
@@ -111,6 +146,7 @@ class SlotOut(BaseModel):
             section=row.section.name,
             subject=row.subject.name,
             teacher=row.teacher.name,
+            simulated=row.simulated,
         )
 
 
@@ -207,6 +243,7 @@ class MonthAttendance(BaseModel):
 
 class ProfileResponse(BaseModel):
     register_no: str
+    simulated: bool  # the student is simulated
     timezone: str  # the zone used for "local" hours, weeks and months
     now: datetime
     min_presence_ratio: float
@@ -232,6 +269,7 @@ class LectureDistracted(BaseModel):
 
 class CurrentResponse(BaseModel):
     register_no: str
+    simulated: bool  # the student is simulated
     timezone: str
     now: datetime
     min_presence_ratio: float
@@ -241,3 +279,46 @@ class CurrentResponse(BaseModel):
     presence_this_lecture: LecturePresence | None
     distracted_this_lecture: LectureDistracted | None
     month: MonthAttendance
+
+
+# ---- simulation ---------------------------------------------------------------------------
+
+
+class EffectIn(BaseModel):
+    """One built-in effect in attention points: kind "teacher" (name), "slot" ("14:00") or "section" (name)."""
+
+    kind: Literal["teacher", "slot", "section"]
+    key: str = Field(min_length=1, max_length=120)
+    value: float
+
+
+class SimulationIn(BaseModel):
+    effects: list[EffectIn]
+    weeks: int | None = Field(default=None, ge=1, le=520)
+    seed: int | None = None
+
+
+class SimulationSummary(BaseModel):
+    """What the loaded simulation holds. `GET /api/simulation` returns null when nothing is loaded."""
+
+    students: int
+    teachers: int
+    sections: list[str]
+    rooms: int
+    lectures: int
+    records: int
+    weeks: int | None
+    seed: int | None
+    effects: list[EffectIn]
+    archetypes: dict[str, int]  # simulated students per archetype
+
+
+class WipeResult(BaseModel):
+    records: int
+    lectures: int
+    slots: int
+    students: int
+    teachers: int
+    rooms: int
+    cameras: int
+    effects: int

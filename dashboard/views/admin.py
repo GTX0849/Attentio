@@ -18,6 +18,7 @@ import streamlit as st
 
 from dashboard import api
 from dashboard.api import BackendError
+from dashboard.simulation import show_banner
 from dashboard.theme import page_header
 from shared.config import Config
 
@@ -138,6 +139,8 @@ def render(config: Config) -> None:
         st.error(str(e))
         return
     tz = ZoneInfo(timetable["timezone"])
+    if _simulation_loaded(config):
+        show_banner(config)
     page_header(
         "Admin",
         "Timetable and sessions",
@@ -146,6 +149,14 @@ def render(config: Config) -> None:
     timetable_section(config, timetable)
     sessions_section(config, tz)
     lectures_section(config, tz)
+
+
+def _simulation_loaded(config: Config) -> bool:
+    """True when simulated data may be among the timetable and lectures shown."""
+    try:
+        return api.get_simulation(config.backend_url) is not None
+    except BackendError:
+        return False
 
 
 def timetable_section(config: Config, timetable: dict[str, Any]) -> None:

@@ -31,9 +31,37 @@ def init_database(database_url: str) -> Engine:
     ensure_database_exists(database_url)
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
+    add_missing_columns(engine)
     with Session(engine) as session:
         seed(session)
     return engine
+
+
+# Columns added after the first release. create_all never alters an existing table, so a
+# database made by an older version gets them here (idempotent).
+_ADDED_COLUMNS = [
+    *(
+        (table, "simulated BOOLEAN NOT NULL DEFAULT false")
+        for table in (
+            "rooms",
+            "cameras",
+            "students",
+            "teachers",
+            "subjects",
+            "sections",
+            "timetable_slots",
+            "lectures",
+        )
+    ),
+    ("students", "section_id INTEGER REFERENCES sections (id)"),
+    ("students", "archetype VARCHAR"),
+]
+
+
+def add_missing_columns(engine: Engine) -> None:
+    with engine.begin() as conn:
+        for table, definition in _ADDED_COLUMNS:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {definition}"))
 
 
 def seed(session: Session) -> None:

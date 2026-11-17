@@ -1,8 +1,9 @@
 """Weekly timetable CSV: parsing, validation and replacing the template.
 
-A new upload replaces the whole template. Slots that are identical to ones
-already stored are kept (same id), so re-uploading the same file changes
-nothing and lectures already created from those slots keep their link. Lectures
+A new upload replaces its own template: a normal upload replaces only the
+non-simulated slots and a simulated upload only the simulated ones. Slots that
+are identical to ones already stored are kept (same id), so re-uploading the
+same file changes nothing and lectures already created from those slots keep their link. Lectures
 copy room, teacher, subject and section, so they survive slots being removed.
 
 The upload is all or nothing: if any row is invalid, nothing is changed and
@@ -205,8 +206,12 @@ class _Registry(Generic[E]):
         return entity
 
 
-def replace_timetable(session: Session, raw: bytes) -> ApplyResult:
-    """Validate the file and, only when every row is valid, make it the template."""
+def replace_timetable(session: Session, raw: bytes, simulated: bool = False) -> ApplyResult:
+    """Validate the file and, only when every row is valid, make it the template.
+
+    Only slots with the same `simulated` flag are replaced; entities created by
+    the upload carry the flag too.
+    """
     parsed = parse_csv(raw)
     if parsed.errors:
         return ApplyResult(
@@ -219,10 +224,10 @@ def replace_timetable(session: Session, raw: bytes) -> ApplyResult:
             errors=parsed.errors,
         )
 
-    teachers = _Registry(session, list(session.scalars(select(Teacher))), lambda t: t.name, lambda n: Teacher(name=n))
-    subjects = _Registry(session, list(session.scalars(select(Subject))), lambda s: s.name, lambda n: Subject(name=n))
-    sections = _Registry(session, list(session.scalars(select(Section))), lambda s: s.name, lambda n: Section(name=n))
-    rooms = _Registry(session, list(session.scalars(select(Room))), lambda r: r.id, lambda n: Room(id=n))
+    teachers = _Registry(session, list(session.scalars(select(Teacher))), lambda t: t.name, lambda n: Teacher(name=n, simulated=simulated))
+    subjects = _Registry(session, list(session.scalars(select(Subject))), lambda s: s.name, lambda n: Subject(name=n, simulated=simulated))
+    sections = _Registry(session, list(session.scalars(select(Section))), lambda s: s.name, lambda n: Section(name=n, simulated=simulated))
+    rooms = _Registry(session, list(session.scalars(select(Room))), lambda r: r.id, lambda n: Room(id=n, simulated=simulated))
 
     wanted: set[SlotKey] = set()
     for row in parsed.rows:
@@ -240,7 +245,7 @@ def replace_timetable(session: Session, raw: bytes) -> ApplyResult:
 
     existing = {
         (s.day_of_week, s.start_time, s.end_time, s.room_id, s.section_id, s.subject_id, s.teacher_id): s
-        for s in session.scalars(select(TimetableSlot))
+        for s in session.scalars(select(TimetableSlot).where(TimetableSlot.simulated == simulated))
     }
     removed_ids = [slot.id for key, slot in existing.items() if key not in wanted]
     if removed_ids:
@@ -255,6 +260,7 @@ def replace_timetable(session: Session, raw: bytes) -> ApplyResult:
             section_id=sec,
             subject_id=sub,
             teacher_id=t,
+            simulated=simulated,
         )
         for (d, s, e, r, sec, sub, t) in added
     )

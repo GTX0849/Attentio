@@ -6,17 +6,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import Engine, func, literal_column, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql.dml import ReturningInsert
 
-from backend import metrics, student_profile
+from backend import metrics, simulation, student_profile
 from backend.clock import Clock, resolve_timezone, system_clock
 from backend.db import init_database
-from backend.lectures import MANUAL, resolve_lecture
+from backend.lectures import MANUAL, LectureResolver
 from backend.models import (
     AttentionRecordRow,
     Camera,
@@ -41,9 +41,14 @@ from backend.schemas import (
     RoomOut,
     RowErrorOut,
     SessionStart,
+    SimulationIn,
+    SimulationSummary,
     SlotOut,
+    StudentCreate,
+    StudentOut,
     TimetableOut,
     TimetableUploadResult,
+    WipeResult,
 )
 from backend.timetable import TimetableFileError, replace_timetable
 from shared.config import database_url, load_config
@@ -94,9 +99,11 @@ def create_app(
     def post_records(records: list[AttentionRecordIn], session: SessionDep) -> IngestResult:
         # The sender's window_start is trusted. Check every reference first so a
         # bad record rejects the whole batch instead of storing part of it.
-        unknown_students = sorted(
-            {r.student_id for r in records if session.get(Student, r.student_id) is None}
+        sent_students = {r.student_id for r in records}
+        known_students = set(
+            session.scalars(select(Student.register_no).where(Student.register_no.in_(sent_students)))
         )
+        unknown_students = sorted(sent_students - known_students)
         if unknown_students:
             raise HTTPException(404, f"Unknown student register number(s): {unknown_students}")
         cameras = {c.id: c for c in session.scalars(select(Camera))}
@@ -120,18 +127,13 @@ def create_app(
                 )
             )
         }
-        lecture_cache: dict[tuple[str, datetime], int | None] = {}
+        resolver = LectureResolver(session, window_len, tz)
 
         def lecture_for(r: AttentionRecordIn) -> int | None:
             start = r.window_start.astimezone(UTC)
             if (r.student_id, start) in already_assigned:
                 return None  # the stored lecture is kept by the upsert below
-            cache_key = (cameras[r.camera_id].room_id, start)
-            if cache_key not in lecture_cache:
-                lecture_cache[cache_key] = resolve_lecture(
-                    session, cache_key[0], start, window_len, tz
-                )
-            return lecture_cache[cache_key]
+            return resolver.resolve(cameras[r.camera_id].room_id, start)
 
         stmt = insert(AttentionRecordRow).values(
             [
@@ -173,7 +175,8 @@ def create_app(
         session: SessionDep,
         minutes: Annotated[int, Query(ge=1, le=24 * 60)] = 10,
     ) -> LiveResponse:
-        if session.get(Student, register_no) is None:
+        student = session.get(Student, register_no)
+        if student is None:
             raise HTTPException(404, f"Unknown student register number: {register_no}")
         since = clock() - timedelta(minutes=minutes)
         rows = session.scalars(
@@ -187,6 +190,7 @@ def create_app(
         ).all()
         return LiveResponse(
             register_no=register_no,
+            simulated=student.simulated,
             minutes=minutes,
             windows=[
                 LiveWindow(
@@ -204,6 +208,35 @@ def create_app(
                 for r in rows
             ],
         )
+
+    @app.post("/api/students", status_code=201)
+    def create_student(body: StudentCreate, session: SessionDep) -> StudentOut:
+        """Register a student, optionally in a section (created, with the same simulated flag, if new)."""
+        if session.get(Student, body.register_no) is not None:
+            raise HTTPException(409, f"Student {body.register_no} already exists")
+        section: Section | None = None
+        if body.section is not None:
+            section = session.scalar(select(Section).where(Section.name == body.section))
+            if section is None:
+                section = Section(name=body.section, simulated=body.simulated)
+                session.add(section)
+                session.flush()
+        student = Student(
+            register_no=body.register_no,
+            name=body.name,
+            section_id=section.id if section else None,
+            simulated=body.simulated,
+            archetype=body.archetype,
+        )
+        session.add(student)
+        session.commit()
+        return StudentOut.from_row(student)
+
+    @app.get("/api/students")
+    def list_students(session: SessionDep) -> list[StudentOut]:
+        """Every student, live ones first, then by register number."""
+        rows = session.scalars(select(Student).order_by(Student.simulated, Student.register_no))
+        return [StudentOut.from_row(r) for r in rows.unique()]
 
     @app.get("/api/students/{register_no}/profile")
     def get_profile(register_no: str, session: SessionDep) -> ProfileResponse:
@@ -226,13 +259,16 @@ def create_app(
 
     @app.post("/api/timetable")
     def upload_timetable(
-        session: SessionDep, file: Annotated[UploadFile, File()]
+        session: SessionDep,
+        file: Annotated[UploadFile, File()],
+        simulated: Annotated[bool, Form()] = False,
     ) -> TimetableUploadResult:
+        """Replace the template. `simulated=true` replaces and creates only simulated slots and entities."""
         raw = file.file.read(MAX_UPLOAD_BYTES + 1)
         if len(raw) > MAX_UPLOAD_BYTES:
             raise HTTPException(413, "The file is larger than 1 MB")
         try:
-            result = replace_timetable(session, raw)
+            result = replace_timetable(session, raw, simulated)
         except TimetableFileError as e:
             raise HTTPException(422, str(e)) from e
         return TimetableUploadResult(
@@ -259,7 +295,10 @@ def create_app(
     @app.get("/api/rooms")
     def list_rooms(session: SessionDep) -> list[RoomOut]:
         rooms = session.scalars(select(Room).order_by(Room.id)).all()
-        return [RoomOut(id=r.id, cameras=sorted(c.id for c in r.cameras)) for r in rooms]
+        return [
+            RoomOut(id=r.id, cameras=sorted(c.id for c in r.cameras), simulated=r.simulated)
+            for r in rooms
+        ]
 
     @app.put("/api/cameras/{camera_id}")
     def register_camera(
@@ -269,12 +308,13 @@ def create_app(
         room = session.get(Room, body.room_id)
         room_created = room is None
         if room is None:
-            session.add(Room(id=body.room_id))
+            session.add(Room(id=body.room_id, simulated=body.simulated))
             session.flush()
         camera = session.get(Camera, camera_id)
         camera_created = camera is None
         if camera is None:
-            session.add(Camera(id=camera_id, room_id=body.room_id))
+            camera = Camera(id=camera_id, room_id=body.room_id, simulated=body.simulated)
+            session.add(camera)
         else:
             camera.room_id = body.room_id
         session.commit()
@@ -283,22 +323,23 @@ def create_app(
             room_id=body.room_id,
             camera_created=camera_created,
             room_created=room_created,
+            simulated=camera.simulated,
         )
 
     @app.get("/api/teachers")
     def list_teachers(session: SessionDep) -> list[NamedItem]:
         rows = session.scalars(select(Teacher).order_by(Teacher.name)).all()
-        return [NamedItem(id=r.id, name=r.name) for r in rows]
+        return [NamedItem(id=r.id, name=r.name, simulated=r.simulated) for r in rows]
 
     @app.get("/api/subjects")
     def list_subjects(session: SessionDep) -> list[NamedItem]:
         rows = session.scalars(select(Subject).order_by(Subject.name)).all()
-        return [NamedItem(id=r.id, name=r.name) for r in rows]
+        return [NamedItem(id=r.id, name=r.name, simulated=r.simulated) for r in rows]
 
     @app.get("/api/sections")
     def list_sections(session: SessionDep) -> list[NamedItem]:
         rows = session.scalars(select(Section).order_by(Section.name)).all()
-        return [NamedItem(id=r.id, name=r.name) for r in rows]
+        return [NamedItem(id=r.id, name=r.name, simulated=r.simulated) for r in rows]
 
     # ---- lectures and manual sessions -------------------------------------------
 
@@ -336,7 +377,8 @@ def create_app(
     @app.post("/api/sessions", status_code=201)
     def start_session(body: SessionStart, session: SessionDep) -> LectureOut:
         """Start a manual session. It overrides the timetable in that room until stopped."""
-        if session.get(Room, body.room_id) is None:
+        room = session.get(Room, body.room_id)
+        if room is None:
             raise HTTPException(404, f"Unknown room: {body.room_id}")
         if session.get(Teacher, body.teacher_id) is None:
             raise HTTPException(404, f"Unknown teacher id: {body.teacher_id}")
@@ -361,6 +403,7 @@ def create_app(
             teacher_id=body.teacher_id,
             subject_id=body.subject_id,
             section_id=body.section_id,
+            simulated=room.simulated,
             lecture_date=now.astimezone(tz).date(),
             starts_at=now,
         )
@@ -384,5 +427,23 @@ def create_app(
         session.commit()
         session.refresh(lecture)
         return LectureOut.from_row(lecture)
+
+    # ---- simulation -------------------------------------------------------------------
+
+    @app.put("/api/simulation")
+    def put_simulation(body: SimulationIn, session: SessionDep) -> SimulationSummary | None:
+        """Store the built-in (true) effects of the simulation, replacing any stored before."""
+        simulation.store_effects(session, body)
+        return simulation.summary(session)
+
+    @app.get("/api/simulation")
+    def get_simulation(session: SessionDep) -> SimulationSummary | None:
+        """What the loaded simulation holds, with its true effects; null when none is loaded."""
+        return simulation.summary(session)
+
+    @app.delete("/api/simulation")
+    def delete_simulation(session: SessionDep) -> WipeResult:
+        """Remove all simulated data and the stored effects. Live data is not touched."""
+        return simulation.wipe(session)
 
     return app

@@ -14,9 +14,9 @@ The worker decides states with the rules in the `states:` section of `config/cla
 | `dashboard/` | Streamlit app; one module per role in `dashboard/views/`, shared look in `dashboard/theme.py` |
 | `.streamlit/` | Streamlit theme (colours and IBM Plex fonts) |
 | `samples/` | `timetable.csv`, a sample weekly timetable for the demo |
-| `simulator/` | Empty placeholder for a later ticket |
+| `simulator/` | Simulated classroom history: cohort, timetable and records generated and sent through the backend API (see Simulator) |
 | `tests/` | pytest suite |
-| `config/classpulse.yaml` | The one shared config file (fps, window length, backend URL, refresh) |
+| `config/classpulse.yaml` | The one shared config file (fps, window length, backend URL, refresh, simulator sizes and effects) |
 
 ## Setup (Windows)
 
@@ -108,11 +108,11 @@ Every attention record is tied to a lecture: a teacher, a subject, a section and
 
 **Timetable.** An admin uploads a weekly CSV with the columns `day` (Mon to Sun), `start` and `end` (`HH:MM`), `room`, `section`, `subject`, `teacher`; see `samples/timetable.csv`. Names that do not exist yet are created. The upload is all or nothing: if any row is invalid, nothing changes and every bad row is reported by line number. Rows in the same room may not overlap.
 
-**A new upload replaces the whole template.** Slots that are identical to ones already stored are kept, so uploading the same file again changes nothing. Lectures already created keep working after a replace, because each lecture holds its own copy of room, teacher, subject and section.
+**A new upload replaces the template of its own kind.** A normal upload replaces only the live (non-simulated) slots; an upload with `simulated=true` (what the simulator sends) replaces only the simulated ones, so the live timetable is never wiped by the simulator and the other way round. Slots that are identical to ones already stored are kept, so uploading the same file again changes nothing. Lectures already created keep working after a replace, because each lecture holds its own copy of room, teacher, subject and section.
 
 **Time zone.** Timetable times are local wall-clock time in the zone named by the `CLASSPULSE_TIMEZONE` environment variable (default `Asia/Kolkata`, can go in `.env`). Records and lectures are stored in UTC, and the backend converts, including daylight saving.
 
-**Rooms and cameras.** Cameras belong to rooms. The seeded `CAM1` is in `R101`. Register another with `PUT /api/cameras/CAM2` and `{"room_id": "R202"}` (the room is created if new).
+**Rooms and cameras.** Cameras belong to rooms. The seeded `CAM1` is in `R101`. Register another with `PUT /api/cameras/CAM2` and `{"room_id": "R202"}` (the room is created if new; add `"simulated": true` for simulated ones).
 
 **Which lecture a record belongs to.** The backend takes the camera's room and the middle of the record's window (`window_start` plus half the window length), then picks:
 
@@ -132,13 +132,53 @@ The Student view shows one student's own figures; the backend answers from that 
 
 **Visibility gate.** When presence over the period is below `scores.min_presence_ratio` in `config/classpulse.yaml` (0.5), attention for that period is "insufficient data": the API returns `null` with a `reason`, and the dashboard shows a dash or leaves the week blank.
 
-**Attendance.** A lecture counts as attended when the time in view is at least 50% of the lecture's full scheduled length (start to end, or start to now for an open session). Time with no record counts as not present, and presence is capped at 100%. A lecture is listed for a student once the student has at least one record in it, so a lecture they never appeared in is not counted. A lecture still running is measured against its full length, so it can read "so far".
+**Attendance.** A lecture counts as attended when the time in view is at least 50% of the lecture's full scheduled length (start to end, or start to now for an open session). Time with no record counts as not present, and presence is capped at 100%. A student who belongs to a section (the simulated students do) is expected at every lecture of that section that has started, so a lecture they have no records in counts as not present. A student without a section, such as `STU001`, is listed only for lectures they have at least one record in. A lecture still running is measured against its full length, so it can read "so far".
 
 **Which records count.** Records with no lecture count toward the overall, live, time-of-day and weekly figures, but not toward by-subject, by-teacher, attendance or the current-lecture stats.
 
 **Time of day.** Attention by time of day groups windows by the local hour they start in (10:00 covers 10:00 to 10:59), in the backend's time zone. Weeks start on Monday, local time, and run from the first week with records to the current one; "this semester" means everything stored for the student.
 
 **Layout.** The live part (header, four stat cards, last 15 minutes of records as stacked columns) refreshes every `dashboard.refresh_seconds`. The semester part (by subject, weekly trend, by teacher, by time of day, attendance) refreshes every minute.
+
+## Simulator
+
+The simulator fills ClassPulse with a realistic classroom history so the analytics have something to show. It is an ordinary client of the backend: it uploads its timetable through the timetable upload (`simulated=true`), registers cameras and students, stores the true effects, and sends attention records through `POST /api/records`. It never writes to the database. Only the data is artificial.
+
+```powershell
+python -m simulator seed                 # wipes the simulated data, then generates and sends a cohort
+python -m simulator seed --small         # a week and 6 students per section, in seconds
+python -m simulator seed --weeks 2 --seed 7 --backend-url http://127.0.0.1:8012
+python -m simulator wipe                 # removes all simulated data
+```
+
+The defaults are in the `simulator:` section of `config/classpulse.yaml`: 2 sections (`SIM-A`, `SIM-B`) of 30 students (`SIM-A01` to `SIM-B30`), 5 teachers, 4 weeks of lectures ending today (weekdays, four 50-minute slots a day: 09:00, 10:00, 11:00, 14:00; rooms `SIM-R201`, `SIM-R202`, cameras `SIM-CAM-201`, `SIM-CAM-202`). The backend must be running. A full run is about 450,000 records and takes a few minutes; progress is printed. The same seed gives the same data.
+
+**Built-in effects (the right answer).** The mean attention of a window is `student baseline + section effect + teacher effect + slot effect`, plus noise, with some neutral time, some not-visible windows and a few absences:
+
+| Effect | Default | Which |
+| --- | --- | --- |
+| Better teacher | +6 points | Dr. Anita Menon (the first teacher); the other four are 0 |
+| Worse slot | -12 points | 14:00 (afternoon); the morning slots are 0 |
+| More attentive section | +5 points | `SIM-A`; `SIM-B` is 0 |
+
+**Why the plain average misleads.** The timetable is built so that the plain class average ranks teachers wrongly: Dr. Anita Menon teaches 4 of her 5 weekly lectures at 14:00 (so she is punished), Prof. Rahul Bhat teaches only `SIM-A` and only in the mornings (so he is flattered), and the 14:00 slot is shared by four teachers on different days, so the slot effect can be told apart from any one teacher. A test (`tests/test_simulator_generation.py`) checks that the plain averages mis-order the teachers.
+
+**Student archetypes** (`engaged`, `average`, `struggling` (attentive, but marks will be low), `disengaged`) set each student's baseline and how often they are absent or not visible. The archetype is stored on the student (`students.archetype`, returned by `GET /api/students`) for the marks simulator to read. The true effects are stored in the `simulation_effects` table and returned by `GET /api/simulation`.
+
+**Marking in the dashboard.** Any view showing simulated data shows a banner ("Simulated data — generated cohort of 60 students over 4 weeks, not real classroom records", counts taken from `GET /api/simulation`). In the Student view the Register number box lists `STU001` and every simulated student; pick `SIM-A01` or type any register number.
+
+**Before a demo, reseed.** The data ends on the day it was generated, so "the last 4 weeks" move on. Run `python -m simulator seed` on the day (it wipes the old simulation first), and `python -m simulator wipe` to take it all out. Live data (`STU001`, `R101`, `CAM1`, the live timetable and live records) is never touched by either.
+
+## Pointing at another backend
+
+Set `CLASSPULSE_BACKEND_URL` (in the environment, or in `.env`) to override `backend.url` in `config/classpulse.yaml` for the dashboard, the worker and the simulator, for example:
+
+```powershell
+$env:CLASSPULSE_BACKEND_URL = "http://127.0.0.1:8012"
+streamlit run dashboard/app.py
+```
+
+The simulator's `--backend-url` option wins over it.
 
 ## Demo steps
 
@@ -167,8 +207,14 @@ Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
 
 **Timetable**
 
-- `POST /api/timetable` takes a multipart form with a CSV in the field `file`. Returns `{"applied", "slots_total", "slots_added", "slots_kept", "slots_removed", "created": {"teachers", "subjects", "rooms", "sections"}, "errors": [{"row", "message"}]}`. `applied` is false when any row is invalid. A file without the required columns, not UTF-8 or empty returns 422.
+- `POST /api/timetable` takes a multipart form with a CSV in the field `file` and an optional `simulated` field (`true` replaces and creates only simulated slots and entities; default `false` touches only live ones). Returns `{"applied", "slots_total", "slots_added", "slots_kept", "slots_removed", "created": {"teachers", "subjects", "rooms", "sections"}, "errors": [{"row", "message"}]}`. `applied` is false when any row is invalid. A file without the required columns, not UTF-8 or empty returns 422.
 - `GET /api/timetable` returns `{"timezone", "slots": [{"id", "day", "day_index", "start", "end", "room", "section", "subject", "teacher"}]}` ordered by day and start.
+
+**Students and simulation**
+
+- `POST /api/students` takes `{"register_no", "name" (optional), "section" (optional name, created if new), "simulated" (default false), "archetype" (optional)}` and returns the student with 201 (409 if it exists). `GET /api/students` lists every student: `[{"register_no", "name", "section", "simulated", "archetype"}]`, live ones first.
+- `PUT /api/simulation` takes `{"effects": [{"kind": "teacher" | "slot" | "section", "key", "value"}], "weeks", "seed"}` (values in attention points; keys are a teacher name, a slot start such as `14:00`, a section name) and replaces the stored effects. `GET /api/simulation` returns `null` when no simulation is loaded, else `{"students", "teachers", "sections", "rooms", "lectures", "records", "weeks", "seed", "effects", "archetypes"}`. `DELETE /api/simulation` removes all simulated records, lectures, slots, students, teachers, subjects, sections, rooms, cameras and effects (live data is untouched) and returns the counts removed.
+- Profile, current and live answers, lectures, rooms, teachers, subjects, sections and timetable slots carry a `simulated` flag.
 
 **Rooms, cameras and pickers**
 

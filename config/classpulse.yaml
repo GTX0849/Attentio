@@ -35,3 +35,41 @@ perception:
   shoulder_visibility_threshold: 0.5   # both shoulders' pose visibility at or above this = shoulders present
   invert_pitch: false            # flip if looking down shows as negative pitch in the preview
   invert_yaw: false              # flip the sign of yaw (it only matters for the absolute value, so rarely needed)
+
+# Simulated classroom history (python -m simulator seed). Effects are in attention points
+# (percentage points of attention, attentive / (attentive + distracted)).
+simulator:
+  weeks: 4                       # weeks of lectures, ending today
+  seed: 20260401                 # same seed, same data
+  students_per_section: 30       # two sections
+  records_per_request: 3000      # records per POST /api/records
+  sections: [SIM-A, SIM-B]       # the first is the more attentive one
+  # The first teacher is the better one, the second teaches the better section in the morning,
+  # the other three are neutral. The default timetable (simulator/timetable.py) is built around this.
+  teachers:
+    - Dr. Anita Menon
+    - Prof. Rahul Bhat
+    - Dr. Sandeep Kulkarni
+    - Ms. Farah Siddiqui
+    - Dr. Vikram Joshi
+  subjects: [Algorithms, Databases, Operating Systems, Networks, Statistics]   # one per teacher
+  effects:
+    best_teacher_points: 6       # the first teacher, over the other four
+    afternoon_slot_points: -12   # the 14:00 slot, over the morning slots
+    better_section_points: 5     # the first section, over the second
+  noise:
+    window: 0.08                 # sd of attention in one 30-second window
+    student_lecture: 0.04        # sd of a student's whole lecture (a good or bad day)
+    lecture: 0.02                # sd shared by everyone in a lecture
+    neutral_share: 0.10          # share of in-view time spent neutral (note taking)
+  # Mix per section, personal baseline attention, chance of missing a whole lecture, and the
+  # chance that a window is not visible. "struggling" students are attentive; the marks
+  # simulator makes their marks low.
+  archetypes:
+    engaged:      {share: 0.34, baseline: 0.84, absent: 0.02, hidden: 0.01}
+    average:      {share: 0.26, baseline: 0.70, absent: 0.05, hidden: 0.03}
+    struggling:   {share: 0.17, baseline: 0.78, absent: 0.04, hidden: 0.02}
+    disengaged:   {share: 0.23, baseline: 0.42, absent: 0.15, hidden: 0.08}
+  small:                         # --small, for tests and quick looks
+    weeks: 1
+    students_per_section: 6

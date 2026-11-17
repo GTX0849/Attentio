@@ -58,6 +58,18 @@ def get_student_profile(backend_url: str, register_no: str) -> dict[str, Any]:
     return body
 
 
+def get_simulation(backend_url: str) -> dict[str, Any] | None:
+    """What the loaded simulation holds (counts, weeks, true effects), or None when there is none."""
+    body: dict[str, Any] | None = _call(backend_url, "GET", "/api/simulation")
+    return body
+
+
+def list_students(backend_url: str) -> list[dict[str, Any]]:
+    """Every student: `register_no`, `name`, `section`, `simulated`, `archetype`. See GET /api/students."""
+    students: list[dict[str, Any]] = _call(backend_url, "GET", "/api/students")
+    return students
+
+
 def get_timetable(backend_url: str) -> dict[str, Any]:
     """`{"timezone": "Asia/Kolkata", "slots": [...]}`. See GET /api/timetable."""
     body: dict[str, Any] = _call(backend_url, "GET", "/api/timetable")

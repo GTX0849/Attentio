@@ -131,6 +131,7 @@ def test_registering_a_camera_to_a_room_creates_the_room_and_can_move_the_camera
         "room_id": "R202",
         "camera_created": True,
         "room_created": True,
+        "simulated": False,
     }
 
     moved = client.put("/api/cameras/CAM2", json={"room_id": "R101"}).json()

@@ -12,6 +12,11 @@ Which records count where:
 - by-subject, by-teacher, attendance and the current-lecture stats use only
   records tied to a lecture.
 
+Attendance depends on the student's section. A student with a section is
+expected at every lecture of that section that has started, so a lecture with
+no records for them counts as not present. A student without a section (the
+live demo student) is listed only for lectures they have records in.
+
 "Time of day" is the local hour of a window's start (10:00 covers 10:00 to
 10:59), in the backend's time zone. A week starts on Monday, local time.
 """
@@ -26,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from backend import metrics
 from backend.metrics import Seconds
-from backend.models import AttentionRecordRow, Lecture
+from backend.models import AttentionRecordRow, Lecture, Student
 from backend.schemas import (
     AttendanceRow,
     CurrentResponse,
@@ -83,12 +88,23 @@ def _lectures(session: Session, ids: Sequence[int]) -> dict[int, Lecture]:
 def _attendance(
     session: Session, register_no: str, now: datetime, min_presence: float
 ) -> list[AttendanceRow]:
-    """One row per lecture the student has records in, newest first."""
+    """One row per lecture, newest first.
+
+    A student with a section gets every started lecture of that section (no records means
+    not present) plus any other lecture they have records in. A student without a section
+    gets only the lectures they have records in.
+    """
     sums = _sums(session, register_no, [Row.lecture_id], [Row.lecture_id.is_not(None)])
     lectures = _lectures(session, [key[0] for key in sums])
+    section_id = session.scalar(select(Student.section_id).where(Student.register_no == register_no))
+    if section_id is not None:
+        section_lectures = session.scalars(
+            select(Lecture).where(Lecture.section_id == section_id, Lecture.starts_at <= now)
+        ).unique()
+        lectures = {**{x.id: x for x in section_lectures}, **lectures}
     rows: list[AttendanceRow] = []
     for lecture in sorted(lectures.values(), key=lambda x: (x.starts_at, x.id), reverse=True):
-        seconds = sums[(lecture.id,)]
+        seconds = sums.get((lecture.id,), Seconds())
         scheduled = metrics.scheduled_seconds(lecture.starts_at, lecture.ends_at, now)
         ratio = metrics.lecture_presence(seconds, scheduled)
         rows.append(
@@ -101,6 +117,10 @@ def _attendance(
             )
         )
     return rows
+
+
+def _is_simulated(session: Session, register_no: str) -> bool:
+    return bool(session.scalar(select(Student.simulated).where(Student.register_no == register_no)))
 
 
 def _month(
@@ -167,6 +187,7 @@ def build_profile(
     attendance = _attendance(session, register_no, now, min_presence)
     return ProfileResponse(
         register_no=register_no,
+        simulated=_is_simulated(session, register_no),
         timezone=tz.key,
         now=now,
         min_presence_ratio=min_presence,
@@ -249,6 +270,7 @@ def build_current(
     attendance = _attendance(session, register_no, now, min_presence)
     return CurrentResponse(
         register_no=register_no,
+        simulated=_is_simulated(session, register_no),
         timezone=tz.key,
         now=now,
         min_presence_ratio=min_presence,

@@ -19,10 +19,16 @@ class Base(DeclarativeBase):
     pass
 
 
+def _simulated_flag() -> Mapped[bool]:
+    """A NOT NULL boolean, false for live data. server_default lets create_all-less upgrades add it."""
+    return mapped_column(default=False, server_default=text("false"))
+
+
 class Room(Base):
     __tablename__ = "rooms"
 
     id: Mapped[str] = mapped_column(primary_key=True)  # e.g. "R101"
+    simulated: Mapped[bool] = _simulated_flag()
     cameras: Mapped[list["Camera"]] = relationship(back_populates="room")
 
 
@@ -31,6 +37,7 @@ class Camera(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True)  # e.g. "CAM1"
     room_id: Mapped[str] = mapped_column(ForeignKey("rooms.id"))
+    simulated: Mapped[bool] = _simulated_flag()
     room: Mapped[Room] = relationship(back_populates="cameras")
 
 
@@ -39,6 +46,13 @@ class Student(Base):
 
     register_no: Mapped[str] = mapped_column(primary_key=True)  # e.g. "STU001"
     name: Mapped[str | None] = mapped_column(default=None)
+    # A student with a section is expected at every lecture of that section (attendance).
+    section_id: Mapped[int | None] = mapped_column(ForeignKey("sections.id"), default=None)
+    simulated: Mapped[bool] = _simulated_flag()
+    # Only simulated students have one: how the simulator generated them (read by the marks ticket).
+    archetype: Mapped[str | None] = mapped_column(default=None)
+
+    section: Mapped["Section | None"] = relationship(lazy="joined")
 
 
 class Teacher(Base):
@@ -46,6 +60,7 @@ class Teacher(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(unique=True)
+    simulated: Mapped[bool] = _simulated_flag()
 
 
 class Subject(Base):
@@ -53,6 +68,7 @@ class Subject(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(unique=True)
+    simulated: Mapped[bool] = _simulated_flag()
 
 
 class Section(Base):
@@ -62,6 +78,7 @@ class Section(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(unique=True)
+    simulated: Mapped[bool] = _simulated_flag()
 
 
 class TimetableSlot(Base):
@@ -78,6 +95,7 @@ class TimetableSlot(Base):
     section_id: Mapped[int] = mapped_column(ForeignKey("sections.id"))
     subject_id: Mapped[int] = mapped_column(ForeignKey("subjects.id"))
     teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id"))
+    simulated: Mapped[bool] = _simulated_flag()
 
     section: Mapped[Section] = relationship(lazy="joined")
     subject: Mapped[Subject] = relationship(lazy="joined")
@@ -118,6 +136,7 @@ class Lecture(Base):
     lecture_date: Mapped[date] = mapped_column(Date)  # local calendar date of the start
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    simulated: Mapped[bool] = _simulated_flag()
 
     teacher: Mapped[Teacher] = relationship(lazy="joined")
     subject: Mapped[Subject] = relationship(lazy="joined")
@@ -141,3 +160,19 @@ class AttentionRecordRow(Base):
         ForeignKey("lectures.id"), default=None, index=True
     )
     lecture: Mapped[Lecture | None] = relationship()
+
+
+class SimulationEffect(Base):
+    """A built-in effect of the loaded simulation, in attention points (percentage points).
+
+    `kind` is "teacher" (key: teacher name), "slot" (key: start time such as "14:00"),
+    "section" (key: section name), or "meta" (key: "weeks" or "seed", for the run itself).
+    """
+
+    __tablename__ = "simulation_effects"
+    __table_args__ = (UniqueConstraint("kind", "key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str]
+    key: Mapped[str]
+    value: Mapped[float] = mapped_column(Float)
