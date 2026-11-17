@@ -1,11 +1,12 @@
 """Request and response shapes of the REST API."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from pydantic import BaseModel, Field
 
-from backend.models import Lecture, TimetableSlot
 from backend.lectures import MANUAL
+from backend.metrics import AttentionFigure
+from backend.models import Lecture, TimetableSlot
 from backend.timetable import DAYS, format_time
 
 
@@ -138,3 +139,105 @@ class SessionStart(BaseModel):
     teacher_id: int
     subject_id: int
     section_id: int | None = None
+
+
+# ---- student profile ------------------------------------------------------------------
+
+
+class FigureOut(BaseModel):
+    """Attention over some period, with the seconds it was summed from.
+
+    `value` is None when it cannot be shown; `reason` then says why:
+    "no_records", "low_presence" (insufficient data: in view less than
+    `min_presence_ratio` of the time) or "no_scored_time".
+    """
+
+    value: float | None
+    reason: str | None
+    presence: float | None
+    attentive: float
+    neutral: float
+    distracted: float
+    not_visible: float
+
+    @classmethod
+    def from_figure(cls, figure: AttentionFigure) -> "FigureOut":
+        return cls(
+            value=figure.value,
+            reason=figure.reason,
+            presence=figure.presence,
+            attentive=figure.seconds.attentive,
+            neutral=figure.seconds.neutral,
+            distracted=figure.seconds.distracted,
+            not_visible=figure.seconds.not_visible,
+        )
+
+
+class NamedFigure(BaseModel):
+    id: int
+    name: str
+    figure: FigureOut
+
+
+class HourFigure(BaseModel):
+    hour: int  # local hour of the day, 0 to 23
+    label: str  # "10:00"
+    figure: FigureOut
+
+
+class WeekFigure(BaseModel):
+    week_start: date  # the Monday of the week, local date
+    figure: FigureOut  # value is None for a week that fails the visibility gate
+
+
+class AttendanceRow(BaseModel):
+    lecture: LectureOut
+    presence: float | None  # in view / the lecture's scheduled length, at most 1
+    present: bool
+    in_progress: bool  # still running, so the figure may still change
+    figure: FigureOut  # attention in this lecture
+
+
+class MonthAttendance(BaseModel):
+    label: str  # "March 2026"
+    present: int
+    total: int  # lectures this month the student has records in
+    min_presence_ratio: float
+
+
+class ProfileResponse(BaseModel):
+    register_no: str
+    timezone: str  # the zone used for "local" hours, weeks and months
+    now: datetime
+    min_presence_ratio: float
+    overall: FigureOut
+    by_subject: list[NamedFigure]
+    by_teacher: list[NamedFigure]
+    by_time_of_day: list[HourFigure]  # only hours with records, ascending
+    weekly: list[WeekFigure]  # first week with records to this week, oldest first
+    attendance: list[AttendanceRow]  # newest lecture first
+    month: MonthAttendance
+
+
+class LecturePresence(BaseModel):
+    ratio: float | None  # in view / elapsed time of the lecture, at most 1
+    visible_seconds: float
+    elapsed_seconds: float
+
+
+class LectureDistracted(BaseModel):
+    seconds: float
+    share_of_visible: float | None  # None when the student was never in view
+
+
+class CurrentResponse(BaseModel):
+    register_no: str
+    timezone: str
+    now: datetime
+    min_presence_ratio: float
+    lecture: LectureOut | None  # the lecture running now that the student has records in
+    attention_last_5_min: FigureOut
+    attention_average: FigureOut  # the student's overall figure
+    presence_this_lecture: LecturePresence | None
+    distracted_this_lecture: LectureDistracted | None
+    month: MonthAttendance

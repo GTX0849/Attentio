@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql.dml import ReturningInsert
 
-from backend import metrics
+from backend import metrics, student_profile
 from backend.clock import Clock, resolve_timezone, system_clock
 from backend.db import init_database
 from backend.lectures import MANUAL, resolve_lecture
@@ -31,11 +31,13 @@ from backend.models import (
 from backend.schemas import (
     CameraOut,
     CameraRegistration,
+    CurrentResponse,
     IngestResult,
     LectureOut,
     LiveResponse,
     LiveWindow,
     NamedItem,
+    ProfileResponse,
     RoomOut,
     RowErrorOut,
     SessionStart,
@@ -75,6 +77,7 @@ def create_app(
     """
     tz: ZoneInfo = resolve_timezone(timezone)  # fail at start-up on a bad zone name
     window_len = window_seconds if window_seconds is not None else load_config().window_seconds
+    min_presence = metrics.min_presence_ratio()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -201,6 +204,23 @@ def create_app(
                 for r in rows
             ],
         )
+
+    @app.get("/api/students/{register_no}/profile")
+    def get_profile(register_no: str, session: SessionDep) -> ProfileResponse:
+        """Attention by subject, teacher, hour and week, attendance per lecture and this month's count.
+
+        Built only from this student's records; see backend/student_profile.py.
+        """
+        if session.get(Student, register_no) is None:
+            raise HTTPException(404, f"Unknown student register number: {register_no}")
+        return student_profile.build_profile(session, register_no, clock(), tz, min_presence)
+
+    @app.get("/api/students/{register_no}/current")
+    def get_current(register_no: str, session: SessionDep) -> CurrentResponse:
+        """The live header: running lecture, last 5 minutes, overall average, presence and distracted time."""
+        if session.get(Student, register_no) is None:
+            raise HTTPException(404, f"Unknown student register number: {register_no}")
+        return student_profile.build_current(session, register_no, clock(), tz, min_presence)
 
     # ---- timetable -----------------------------------------------------------
 

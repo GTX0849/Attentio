@@ -124,6 +124,22 @@ A lecture is one occurrence of a slot on a date, or one manual session. It is cr
 
 **Manual sessions** are started and stopped from the Admin view. While one is open it overrides the timetable for its room, and a room can have only one open session. A window counts as inside a session when its middle falls between the start and the stop.
 
+## Student profile
+
+The Student view shows one student's own figures; the backend answers from that student's records only.
+
+**How the figures are worked out.** Every figure comes from summed seconds over the period shown, never from averaging window percentages. Attention is attentive / (attentive + distracted); presence is (attentive + neutral + distracted) / all recorded seconds. The functions are plain code in `backend/metrics.py` so later teacher figures reuse them.
+
+**Visibility gate.** When presence over the period is below `scores.min_presence_ratio` in `config/classpulse.yaml` (0.5), attention for that period is "insufficient data": the API returns `null` with a `reason`, and the dashboard shows a dash or leaves the week blank.
+
+**Attendance.** A lecture counts as attended when the time in view is at least 50% of the lecture's full scheduled length (start to end, or start to now for an open session). Time with no record counts as not present, and presence is capped at 100%. A lecture is listed for a student once the student has at least one record in it, so a lecture they never appeared in is not counted. A lecture still running is measured against its full length, so it can read "so far".
+
+**Which records count.** Records with no lecture count toward the overall, live, time-of-day and weekly figures, but not toward by-subject, by-teacher, attendance or the current-lecture stats.
+
+**Time of day.** Attention by time of day groups windows by the local hour they start in (10:00 covers 10:00 to 10:59), in the backend's time zone. Weeks start on Monday, local time, and run from the first week with records to the current one; "this semester" means everything stored for the student.
+
+**Layout.** The live part (header, four stat cards, last 15 minutes of records as stacked columns) refreshes every `dashboard.refresh_seconds`. The semester part (by subject, weekly trend, by teacher, by time of day, attendance) refreshes every minute.
+
 ## Demo steps
 
 1. Start the backend, then the dashboard, then the worker as above (the worker command is in the Run section).
@@ -143,6 +159,11 @@ Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
   `{"camera_id": "CAM1", "student_id": "STU001", "window_start": "2026-01-01T10:00:00+00:00", "attentive": 20, "neutral": 0, "distracted": 0, "not_visible": 10}`.
   `window_start` must be timezone-aware. A repeat of the same `(student_id, window_start)` replaces the stored row and keeps its lecture. Returns `{"received", "inserted", "updated"}`. An unknown student or camera returns 404 and the whole batch is rejected.
 - `GET /api/students/{register_no}/live?minutes=N` (default 10) returns `{"register_no", "minutes", "windows": [...]}`, oldest first. Each window has `window_start`, the four state seconds, `attention` (attentive / (attentive + distracted), or null), `presence` ((attentive + neutral + distracted) / total) and `lecture` (a lecture object as below, or null when unassigned). Unknown student returns 404.
+
+**Student profile** (see Student profile above; a figure object is `{"value", "reason", "presence", "attentive", "neutral", "distracted", "not_visible"}` with `value` null and `reason` set to `no_records`, `low_presence` or `no_scored_time` when it cannot be shown)
+
+- `GET /api/students/{register_no}/profile` returns `{"register_no", "timezone", "now", "min_presence_ratio", "overall": figure, "by_subject": [{"id", "name", "figure"}], "by_teacher": [...], "by_time_of_day": [{"hour", "label", "figure"}], "weekly": [{"week_start", "figure"}], "attendance": [{"lecture", "presence", "present", "in_progress", "figure"}], "month": {"label", "present", "total", "min_presence_ratio"}}`. Attendance is newest first. Unknown student returns 404.
+- `GET /api/students/{register_no}/current` returns `{"register_no", "timezone", "now", "min_presence_ratio", "lecture", "attention_last_5_min": figure, "attention_average": figure, "presence_this_lecture": {"ratio", "visible_seconds", "elapsed_seconds"} or null, "distracted_this_lecture": {"seconds", "share_of_visible"} or null, "month"}`. `lecture` is the running lecture the student has records in, or null. "Now", "this month" and "last 5 minutes" come from the backend clock.
 
 **Timetable**
 

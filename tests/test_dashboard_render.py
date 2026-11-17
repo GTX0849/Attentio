@@ -38,6 +38,102 @@ LECTURE = {
 }
 
 
+def figure(
+    value: float | None,
+    reason: str | None = None,
+    presence: float | None = 0.9,
+    attentive: float = 0,
+    distracted: float = 0,
+) -> dict[str, Any]:
+    return {
+        "value": value,
+        "reason": reason,
+        "presence": presence,
+        "attentive": attentive,
+        "neutral": 0,
+        "distracted": distracted,
+        "not_visible": 0,
+    }
+
+
+DS_LECTURE = {
+    **LECTURE,
+    "id": 9,
+    "source": "timetable",
+    "teacher": "Dr. Meera Iyer",
+    "subject": "Data Structures",
+    "start": "2026-03-02T04:32:00Z",  # 10:02 in Asia/Kolkata
+    "end": "2026-03-02T05:22:00Z",
+    "open": False,
+}
+MONTH = {"label": "March 2026", "present": 17, "total": 19, "min_presence_ratio": 0.5}
+CURRENT = {
+    "register_no": "STU001",
+    "timezone": "Asia/Kolkata",
+    "now": "2026-03-02T05:06:00Z",
+    "min_presence_ratio": 0.5,
+    "lecture": DS_LECTURE,
+    "attention_last_5_min": figure(0.782),
+    "attention_average": figure(0.72),
+    "presence_this_lecture": {"ratio": 33 / 34, "visible_seconds": 1980, "elapsed_seconds": 2040},
+    "distracted_this_lecture": {"seconds": 250, "share_of_visible": 0.12},
+    "month": MONTH,
+}
+NO_CURRENT = {
+    **CURRENT,
+    "lecture": None,
+    "attention_last_5_min": figure(None, "no_records", None),
+    "attention_average": figure(None, "no_records", None),
+    "presence_this_lecture": None,
+    "distracted_this_lecture": None,
+    "month": {**MONTH, "present": 0, "total": 0},
+}
+PROFILE = {
+    "register_no": "STU001",
+    "timezone": "Asia/Kolkata",
+    "now": "2026-03-02T05:06:00Z",
+    "min_presence_ratio": 0.5,
+    "overall": figure(0.72),
+    "by_subject": [
+        {"id": 1, "name": "Data Structures", "figure": figure(0.81)},
+        {"id": 2, "name": "Physics", "figure": figure(None, "low_presence", 0.3)},
+    ],
+    "by_teacher": [{"id": 1, "name": "Dr. Meera Iyer", "figure": figure(0.81)}],
+    "by_time_of_day": [{"hour": 10, "label": "10:00", "figure": figure(0.8)}],
+    "weekly": [
+        {"week_start": "2026-02-23", "figure": figure(0.7)},
+        {"week_start": "2026-03-02", "figure": figure(None, "low_presence", 0.2)},
+    ],
+    "attendance": [
+        {
+            "lecture": DS_LECTURE,
+            "presence": 0.58,
+            "present": True,
+            "in_progress": True,
+            "figure": figure(0.8),
+        },
+        {
+            "lecture": {**DS_LECTURE, "id": 8, "start": "2026-02-23T04:32:00Z"},
+            "presence": 0.2,
+            "present": False,
+            "in_progress": False,
+            "figure": figure(None, "low_presence", 0.2),
+        },
+    ],
+    "month": MONTH,
+}
+NO_PROFILE = {
+    **PROFILE,
+    "overall": figure(None, "no_records", None),
+    "by_subject": [],
+    "by_teacher": [],
+    "by_time_of_day": [],
+    "weekly": [],
+    "attendance": [],
+    "month": {**MONTH, "present": 0, "total": 0},
+}
+
+
 @pytest.fixture
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Replace the dashboard's HTTP calls; the returned dict records what was sent."""
@@ -73,6 +169,9 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         open_sessions.clear()
         return {**LECTURE, "open": False}
 
+    monkeypatch.setattr(student, "get_live", lambda url, reg, minutes: [])
+    monkeypatch.setattr(student, "get_current", lambda url, reg: NO_CURRENT)
+    monkeypatch.setattr(student, "get_profile", lambda url, reg: NO_PROFILE)
     monkeypatch.setattr(api, "upload_timetable", upload)
     monkeypatch.setattr(api, "start_session", start)
     monkeypatch.setattr(api, "stop_session", stop)
@@ -100,31 +199,113 @@ def html_of(at: AppTest) -> str:
     return " ".join(str(el.proto.body) for el in at.get("html"))
 
 
-def test_student_view_names_the_current_lecture_in_its_header(
+def fake_student(
+    monkeypatch: pytest.MonkeyPatch,
+    current: dict[str, Any],
+    profile: dict[str, Any],
+    windows: list[dict[str, Any]],
+) -> None:
+    monkeypatch.setattr(student, "get_current", lambda url, reg: current)
+    monkeypatch.setattr(student, "get_profile", lambda url, reg: profile)
+    monkeypatch.setattr(student, "get_live", lambda url, reg, minutes: windows)
+
+
+def test_student_view_with_data_shows_header_cards_and_charts(
     fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(student, "get_live", lambda url, reg, minutes: [window(LECTURE)])
+    fake_student(monkeypatch, CURRENT, PROFILE, [window(DS_LECTURE)])
     at = run_app()
     assert not at.exception
     page = html_of(at)
     assert "Student · STU001" in page
     assert "Your attention, live" in page
-    assert "Mathematics · Dr Rao · CSE-A · room R101" in page
+    assert "Data Structures · Dr. Meera Iyer · CSE-A · Room R101 · started 10:02" in page
+    assert "Live · updated" in page
+
+    for label in (
+        "Attention, last 5 min",
+        "Presence, this lecture",
+        "Distracted, this lecture",
+        "Attendance, this month",
+    ):
+        assert label in page
+    assert "78%" in page and "+6.2 pts vs your average" in page
+    assert "97%" in page and "In view 33 of 34 min" in page
+    assert "4 min 10 s" in page and "12% of visible time" in page
+    assert "17 of 19" in page and "Present at 50% in view or more" in page
+
+    assert [s.value for s in at.subheader] == [
+        "Seconds in each state, per 30-second window",
+        "Attention by subject",
+        "Weekly attention this semester",
+    ]
+    captions = [c.value for c in at.caption]
+    assert "Last 15 minutes · each column is one record sent by the worker" in captions
+    assert "This semester, from summed seconds" in captions
+    assert "All subjects · weeks with under 50% presence are left blank" in captions
+    assert "Not enough time in view: Physics" in captions  # a subject that fails the gate
+    assert len(at.get("vega_lite_chart")) == 5  # states, subject, week, teacher, hour
+    assert len(at.dataframe) == 1  # the attendance list
+    assert [t.label for t in at.tabs] == ["By teacher", "By time of day"]
+    assert [e.label for e in at.expander] == ["Attendance"]
 
 
-def test_student_view_says_so_when_the_latest_window_has_no_lecture(
-    fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
+def test_student_view_with_no_data_shows_dashes_and_plain_reasons(
+    fake_backend: dict[str, list[Any]],
 ) -> None:
-    monkeypatch.setattr(student, "get_live", lambda url, reg, minutes: [window(None)])
     at = run_app()
     assert not at.exception
-    assert "No lecture matched the latest window" in html_of(at)
+    page = html_of(at)
+    assert "No lecture in progress" in page
+    assert "Live · waiting for records" in page
+    assert page.count("—") >= 4  # every card shows a dash
+    assert "No records yet" in page  # attention reason
+    assert "No lectures this month" in page
+    infos = [i.value for i in at.info]
+    assert "No records in the last 15 minutes. Is the worker running?" in infos
+    assert infos.count(student.EMPTY_LECTURES) >= 3  # subject, teacher and attendance panels
+    assert "No weeks to show yet" in infos
+    assert len(at.get("vega_lite_chart")) == 0
+
+
+def test_student_card_says_when_attention_has_too_little_time_in_view(
+    fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = {**CURRENT, "attention_last_5_min": figure(None, "low_presence", 0.3)}
+    fake_student(monkeypatch, current, PROFILE, [window(DS_LECTURE)])
+    at = run_app()
+    assert not at.exception
+    assert "Not enough time in view" in html_of(at)
+
+
+def test_student_view_reports_a_backend_error_in_place(
+    fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def down(url: str, reg: str) -> dict[str, Any]:
+        raise api.BackendError("Cannot reach the backend at http://x")
+
+    monkeypatch.setattr(student, "get_current", down)
+    monkeypatch.setattr(student, "get_profile", down)
+    at = run_app()
+    assert not at.exception
+    assert any("Cannot reach the backend" in e.value for e in at.error)
+    assert "Your attention, live" in html_of(at)
+
+
+def test_student_helpers_word_the_cards_from_the_api_figures() -> None:
+    assert student.format_duration(250) == "4 min 10 s"
+    assert student.format_duration(45) == "45 s"
+    assert student.minutes_pair(20, 40) == "In view 20 of 40 s"
+    assert student.attention_card(CURRENT) == ("78%", "+6.2 pts vs your average")
+    below = {**CURRENT, "attention_last_5_min": figure(0.6)}
+    assert student.attention_card(below) == ("60%", "-12.0 pts vs your average")
+    assert student.distracted_card(NO_CURRENT) == ("—", "No lecture in progress")
+    assert student.attendance_card(CURRENT) == ("17 of 19", "Present at 50% in view or more")
 
 
 def test_sidebar_has_the_role_switcher_and_the_states_legend(
     fake_backend: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(student, "get_live", lambda url, reg, minutes: [])
     at = run_app()
     assert at.session_state["role"] == "Student"
     page = html_of(at)

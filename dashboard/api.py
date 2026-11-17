@@ -43,6 +43,21 @@ def get_live(backend_url: str, register_no: str, minutes: int) -> list[dict[str,
     return windows
 
 
+def get_student_current(backend_url: str, register_no: str) -> dict[str, Any]:
+    """The live header figures: running lecture, last 5 minutes, average, presence, month count.
+
+    See GET /api/students/{id}/current.
+    """
+    body: dict[str, Any] = _call(backend_url, "GET", f"/api/students/{register_no}/current")
+    return body
+
+
+def get_student_profile(backend_url: str, register_no: str) -> dict[str, Any]:
+    """Semester breakdowns, weekly trend and attendance. See GET /api/students/{id}/profile."""
+    body: dict[str, Any] = _call(backend_url, "GET", f"/api/students/{register_no}/profile")
+    return body
+
+
 def get_timetable(backend_url: str) -> dict[str, Any]:
     """`{"timezone": "Asia/Kolkata", "slots": [...]}`. See GET /api/timetable."""
     body: dict[str, Any] = _call(backend_url, "GET", "/api/timetable")

@@ -88,6 +88,16 @@ def page_header_html(eyebrow: str, title: str, context_line: str = "") -> str:
     )
 
 
+def live_indicator_html(text: str, live: bool = True) -> str:
+    """A small right-aligned status line with a dot: blue while records are arriving, grey if not."""
+    dot = PRIMARY if live else STATE_COLOURS["Not visible"]
+    return (
+        f'<div style="text-align:right;font-size:13px;color:{SECONDARY_TEXT};padding-top:10px;">'
+        f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+        f'background:{dot};margin-right:8px;"></span>{escape(text)}</div>'
+    )
+
+
 def simulated_banner_html(text: str) -> str:
     return (
         f'<div style="background:{BANNER_BACKGROUND};color:{BANNER_TEXT};border-radius:8px;'
@@ -130,6 +140,11 @@ def stat_card(label: str, figure: str, comparison: str, accent: bool = False) ->
 def page_header(eyebrow: str, title: str, context_line: str = "") -> None:
     """Eyebrow (small caps), page title and an optional context line."""
     st.html(page_header_html(eyebrow, title, context_line))
+
+
+def live_indicator(text: str, live: bool = True) -> None:
+    """"Live · updated 12 s ago" style status for the right of a page header."""
+    st.html(live_indicator_html(text, live))
 
 
 def simulated_banner(text: str) -> None:
