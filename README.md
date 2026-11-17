@@ -140,6 +140,28 @@ The Student view shows one student's own figures; the backend answers from that 
 
 **Layout.** The live part (header, four stat cards, last 15 minutes of records as stacked columns) refreshes every `dashboard.refresh_seconds`. The semester part (by subject, weekly trend, by teacher, by time of day, attendance) refreshes every minute.
 
+## Teacher figures
+
+The Teacher view gives a teacher feedback on their lectures, not a ranking. The figures are plain functions in `backend/teacher_figures.py` (the docstring there is the full definition), checked by `tests/test_teacher_figures.py` against hand-worked numbers. Records with no lecture are ignored throughout. Attention is worked from summed seconds with the visibility gate, as everywhere else: a student's time in a lecture counts only when they were in view for at least `scores.min_presence_ratio` of it.
+
+**Students vs their own average (self-comparison).** For each student and lecture, the difference is the student's attention in that lecture minus their own attention over all their lectures (every teacher), in percentage points. A teacher's figure is the mean over their students of each student's mean difference across that teacher's lectures. This removes differences between students and between sections: a teacher of a strong section is not flattered, and a teacher of a weak one is not punished.
+
+**After removing time-slot effect (slot-adjusted).** The slot is the lecture's local start time (such as `14:00`; a manual session uses its start hour). The slot effect is the mean difference over every student and lecture in that slot, across all teachers. The slot-adjusted figure is the self-comparison after subtracting each lecture's slot effect first.
+
+**Weighting.** Not weighted by seconds. Seconds enter only inside "attention in this lecture" and "own average". Each lecture counts once for a student, however long they were in view, and each student counts once for the teacher, however many of the teacher's lectures they attended.
+
+**Range.** Across the teacher's students, mean +/- z x sd / sqrt(n), with sd the sample standard deviation of the per-student means and z the normal quantile for `teachers.range_level` (1.96 for 0.95). A normal approximation: fine for tens of students, rough for a handful. One student gives no range. The number of students is returned with every figure and the number of lectures with the teacher.
+
+**Hiding.** Until a teacher has `teachers.min_lectures` (5) lectures with records, both figures are `null` with the reason "fewer than 5 lectures". Both settings are in the `teachers:` section of `config/classpulse.yaml`.
+
+**What this can and cannot do.** The self-comparison does not remove a time-slot penalty: a teacher who mostly teaches at a bad time of day is still marked down by it. The slot-adjusted figure takes the slot's average effect out, but it cannot separate a teacher from a slot they always teach in: if only one teacher ever teaches at 14:00, the 14:00 effect and that teacher's effect are the same number, and the adjustment removes both. The figures are feedback, not proof of a teacher's quality. They need several teachers sharing each slot, and the Teacher view says so under the Student groups card.
+
+**On the simulated cohort** (4 weeks, 60 students, built-in effects in the Simulator section) the self-comparison leaves Dr. Anita Menon at about -1.8 points, because 4 of her 5 weekly lectures are at 14:00, which is built 12 points worse. After the slot adjustment she is at about +3.5 and the other four teachers are between -0.8 and -0.1. Of the +6 built in, the slot adjustment recovers about +3.5: the slot effect is estimated from lectures she teaches herself, so some of her advantage is taken out with it.
+
+**Dashboard.** Pick a teacher in the sidebar. The header, four stat cards (self-comparison, slot-adjusted, marks vs own percentile, attendance), the in-lecture attention line for a chosen lecture (attentive / (attentive + distracted) over all students' summed seconds in each 30-second window), Recent lectures and Student groups. The marks card and the Student groups card show a plain placeholder until marks are uploaded (hooks: `marks_card` and `student_groups` in `dashboard/views/teacher.py`).
+
+**Attendance.** A teacher's attendance is the students present (in view for at least half of a lecture's full length) over the students expected (the lecture's section size, or the students with records if it has no section), summed over their lectures.
+
 ## Simulator
 
 The simulator fills ClassPulse with a realistic classroom history so the analytics have something to show. It is an ordinary client of the backend: it uploads its timetable through the timetable upload (`simulated=true`), registers cameras and students, stores the true effects, and sends attention records through `POST /api/records`. It never writes to the database. Only the data is artificial.
@@ -204,6 +226,12 @@ Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
 
 - `GET /api/students/{register_no}/profile` returns `{"register_no", "timezone", "now", "min_presence_ratio", "overall": figure, "by_subject": [{"id", "name", "figure"}], "by_teacher": [...], "by_time_of_day": [{"hour", "label", "figure"}], "weekly": [{"week_start", "figure"}], "attendance": [{"lecture", "presence", "present", "in_progress", "figure"}], "month": {"label", "present", "total", "min_presence_ratio"}}`. Attendance is newest first. Unknown student returns 404.
 - `GET /api/students/{register_no}/current` returns `{"register_no", "timezone", "now", "min_presence_ratio", "lecture", "attention_last_5_min": figure, "attention_average": figure, "presence_this_lecture": {"ratio", "visible_seconds", "elapsed_seconds"} or null, "distracted_this_lecture": {"seconds", "share_of_visible"} or null, "month"}`. `lecture` is the running lecture the student has records in, or null. "Now", "this month" and "last 5 minutes" come from the backend clock.
+
+**Teacher feedback** (see Teacher figures above; times in UTC, figures in percentage points)
+
+- `GET /api/teachers/{id}/feedback` returns `{"teacher_id", "teacher", "simulated", "timezone", "now", "min_lectures", "range_level", "n_lectures", "hidden", "reason", "self_comparison": {"value", "low", "high", "n_students"}, "slot_adjusted": {...}, "attendance": {"present", "expected", "rate"}, "lectures": [{"lecture", "present", "expected", "in_progress", "attention": figure}]}`. Lectures are the teacher's own, newest first; nothing about other teachers is returned. While `hidden` the figures are all `null` and `reason` is "fewer than 5 lectures". Unknown teacher returns 404.
+- `GET /api/teachers/feedback` returns the same summary (without `lectures`) for every teacher, sorted by name, from one pass over the records. It is for the admin view.
+- `GET /api/lectures/{id}/timeline` returns `{"lecture", "window_seconds", "points": [{"window", "offset_seconds", "students", "attentive", "distracted", "attention"}]}`: class attention per 30-second window counted from the lecture's start, only for windows that have records. Unknown lecture returns 404.
 
 **Timetable**
 

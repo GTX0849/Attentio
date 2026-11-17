@@ -94,6 +94,27 @@ def list_teachers(backend_url: str) -> list[dict[str, Any]]:
     return teachers
 
 
+def get_teacher_feedback(backend_url: str, teacher_id: int) -> dict[str, Any]:
+    """One teacher's figures, lectures and attendance, nothing about other teachers.
+
+    See GET /api/teachers/{id}/feedback.
+    """
+    body: dict[str, Any] = _call(backend_url, "GET", f"/api/teachers/{teacher_id}/feedback")
+    return body
+
+
+def list_teacher_feedback(backend_url: str) -> list[dict[str, Any]]:
+    """Every teacher's figures and attendance, for the admin view. See GET /api/teachers/feedback."""
+    rows: list[dict[str, Any]] = _call(backend_url, "GET", "/api/teachers/feedback")
+    return rows
+
+
+def get_lecture_timeline(backend_url: str, lecture_id: int) -> dict[str, Any]:
+    """Class attention per 30-second window of one lecture. See GET /api/lectures/{id}/timeline."""
+    body: dict[str, Any] = _call(backend_url, "GET", f"/api/lectures/{lecture_id}/timeline")
+    return body
+
+
 def list_subjects(backend_url: str) -> list[dict[str, Any]]:
     subjects: list[dict[str, Any]] = _call(backend_url, "GET", "/api/subjects")
     return subjects

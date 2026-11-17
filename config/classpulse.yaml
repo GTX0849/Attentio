@@ -25,6 +25,11 @@ states:
 scores:
   min_presence_ratio: 0.5        # presence below this over the period shown hides attention; a lecture counts as attended at or above it
 
+# Teacher figures (backend/teacher_figures.py).
+teachers:
+  min_lectures: 5                # a teacher's figures stay hidden until they have this many lectures with records
+  range_level: 0.95              # the range shown around each figure (0.95 is mean +/- 1.96 standard errors)
+
 # Real readings from the webcam (worker/perception.py, worker/mediapipe_source.py).
 perception:
   calibration_seconds: 3         # at launch (and on recalibrate) the person looks at the screen this long

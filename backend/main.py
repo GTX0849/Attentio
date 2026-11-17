@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql.dml import ReturningInsert
 
-from backend import metrics, simulation, student_profile
+from backend import metrics, simulation, student_profile, teacher_feedback, teacher_figures
 from backend.clock import Clock, resolve_timezone, system_clock
 from backend.db import init_database
 from backend.lectures import MANUAL, LectureResolver
@@ -46,6 +46,9 @@ from backend.schemas import (
     SlotOut,
     StudentCreate,
     StudentOut,
+    TeacherFeedback,
+    TeacherSummary,
+    TimelineResponse,
     TimetableOut,
     TimetableUploadResult,
     WipeResult,
@@ -83,6 +86,7 @@ def create_app(
     tz: ZoneInfo = resolve_timezone(timezone)  # fail at start-up on a bad zone name
     window_len = window_seconds if window_seconds is not None else load_config().window_seconds
     min_presence = metrics.min_presence_ratio()
+    teacher_settings = teacher_figures.teacher_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -330,6 +334,30 @@ def create_app(
     def list_teachers(session: SessionDep) -> list[NamedItem]:
         rows = session.scalars(select(Teacher).order_by(Teacher.name)).all()
         return [NamedItem(id=r.id, name=r.name, simulated=r.simulated) for r in rows]
+
+    @app.get("/api/teachers/feedback")
+    def all_teachers_feedback(session: SessionDep) -> list[TeacherSummary]:
+        """Every teacher's figures (self-comparison, slot-adjusted, ranges) and attendance, by name.
+
+        For the admin view. Worked out in one pass; see backend/teacher_figures.py.
+        """
+        return teacher_feedback.build_all(session, clock(), tz, teacher_settings, min_presence)
+
+    @app.get("/api/teachers/{teacher_id}/feedback")
+    def get_teacher_feedback(teacher_id: int, session: SessionDep) -> TeacherFeedback:
+        """One teacher's figures, lectures (newest first) and attendance. Nothing about other teachers."""
+        teacher = session.get(Teacher, teacher_id)
+        if teacher is None:
+            raise HTTPException(404, f"Unknown teacher id: {teacher_id}")
+        return teacher_feedback.build_one(session, teacher, clock(), tz, teacher_settings, min_presence)
+
+    @app.get("/api/lectures/{lecture_id}/timeline")
+    def get_lecture_timeline(lecture_id: int, session: SessionDep) -> TimelineResponse:
+        """Class attention per 30-second window of one lecture, counted from its start."""
+        lecture = session.get(Lecture, lecture_id)
+        if lecture is None:
+            raise HTTPException(404, f"Unknown lecture id: {lecture_id}")
+        return teacher_feedback.build_timeline(session, lecture, window_len)
 
     @app.get("/api/subjects")
     def list_subjects(session: SessionDep) -> list[NamedItem]:

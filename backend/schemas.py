@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from backend.lectures import MANUAL
 from backend.metrics import AttentionFigure
 from backend.models import Lecture, Student, TimetableSlot
+from backend.teacher_figures import Figure as TeacherFigure
 from backend.timetable import DAYS, format_time
 
 
@@ -322,3 +323,71 @@ class WipeResult(BaseModel):
     rooms: int
     cameras: int
     effects: int
+
+
+# ---- teacher feedback ------------------------------------------------------------------------
+
+
+class TeacherFigureOut(BaseModel):
+    """A teacher figure in percentage points, with its range over `n_students` students.
+
+    All three numbers are None while the figures are hidden or when no student has enough data.
+    """
+
+    value: float | None
+    low: float | None
+    high: float | None
+    n_students: int
+
+    @classmethod
+    def from_figure(cls, figure: TeacherFigure) -> "TeacherFigureOut":
+        return cls(value=figure.value, low=figure.low, high=figure.high, n_students=figure.n_students)
+
+
+class TeacherLectureRow(BaseModel):
+    lecture: LectureOut
+    present: int  # students in view for at least `min_presence_ratio` of the lecture's length
+    expected: int  # the section's size, or the students with records when the lecture has no section
+    in_progress: bool
+    attention: FigureOut  # the whole lecture, from every student's summed seconds
+
+
+class TeacherAttendance(BaseModel):
+    present: int
+    expected: int
+    rate: float | None  # present / expected over the teacher's lectures; None with no lectures
+
+
+class TeacherSummary(BaseModel):
+    teacher_id: int
+    teacher: str
+    simulated: bool
+    n_lectures: int  # lectures with records
+    hidden: bool  # fewer lectures than `min_lectures`
+    reason: str | None  # why there is no value: "fewer than 5 lectures", or no student had enough data
+    self_comparison: TeacherFigureOut  # the teacher's students against their own average, points
+    slot_adjusted: TeacherFigureOut  # the same after removing each time slot's average effect
+    attendance: TeacherAttendance
+
+
+class TeacherFeedback(TeacherSummary):
+    timezone: str
+    now: datetime
+    min_lectures: int
+    range_level: float
+    lectures: list[TeacherLectureRow]  # newest first
+
+
+class TimelinePoint(BaseModel):
+    window: int  # 0 for the first 30 seconds of the lecture
+    offset_seconds: float  # window start, seconds after the lecture started
+    students: int  # students with a record in the window
+    attentive: float
+    distracted: float
+    attention: float | None  # attentive / (attentive + distracted); None with neither
+
+
+class TimelineResponse(BaseModel):
+    lecture: LectureOut
+    window_seconds: int
+    points: list[TimelinePoint]  # only windows that have records, oldest first

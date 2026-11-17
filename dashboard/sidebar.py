@@ -64,17 +64,19 @@ def _student_select(config: Config) -> None:
 
 
 def _teacher_select(config: Config) -> None:
-    """Placeholder: the choice is stored, a later ticket shows that teacher's figures."""
+    """Pick one of the real teachers; the Teacher view shows that teacher's feedback."""
     try:
         names = [t["name"] for t in api.list_teachers(config.backend_url)]
     except BackendError as e:
         st.warning(str(e))
         return
+    if not names:
+        st.caption(teacher.NO_TEACHERS)
+        return
     st.selectbox(
         "Teacher",
         names,
-        index=None,
-        placeholder="Select a teacher",
+        index=0,
         key=teacher.TEACHER_KEY,
         persist_state="session",
     )

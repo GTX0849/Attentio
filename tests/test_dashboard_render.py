@@ -151,6 +151,24 @@ NO_PROFILE = {
 }
 
 
+NO_TEACHER_FEEDBACK = {
+    "teacher_id": 1,
+    "teacher": "Dr Rao",
+    "simulated": False,
+    "timezone": "Asia/Kolkata",
+    "now": "2026-03-02T05:06:00Z",
+    "min_lectures": 5,
+    "range_level": 0.95,
+    "n_lectures": 0,
+    "hidden": True,
+    "reason": "fewer than 5 lectures",
+    "self_comparison": {"value": None, "low": None, "high": None, "n_students": 0},
+    "slot_adjusted": {"value": None, "low": None, "high": None, "n_students": 0},
+    "attendance": {"present": 0, "expected": 0, "rate": None},
+    "lectures": [],
+}
+
+
 @pytest.fixture
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Replace the dashboard's HTTP calls; the returned dict records what was sent."""
@@ -188,6 +206,8 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         open_sessions.clear()
         return {**LECTURE, "open": False}
 
+    monkeypatch.setattr(api, "get_teacher_feedback", lambda url, teacher_id: NO_TEACHER_FEEDBACK)
+    monkeypatch.setattr(api, "get_lecture_timeline", lambda url, lecture_id: {"points": []})
     monkeypatch.setattr(student, "get_live", lambda url, reg, minutes: [])
     monkeypatch.setattr(student, "get_current", lambda url, reg: NO_CURRENT)
     monkeypatch.setattr(student, "get_profile", lambda url, reg: NO_PROFILE)
@@ -386,9 +406,9 @@ def test_teacher_view_renders_with_a_teacher_select(fake_backend: dict[str, list
     at.session_state["role"] = "Teacher"
     at.run()
     assert not at.exception
-    assert "Your lectures" in html_of(at)
-    at.sidebar.selectbox(key="teacher_name").select("Dr Rao").run()
-    assert "Showing Dr Rao" in html_of(at)
+    page = html_of(at)
+    assert "Teacher · Dr Rao" in page and "Feedback on your lectures" in page
+    assert at.sidebar.selectbox(key="teacher_name").value == "Dr Rao"
 
 
 def test_theme_helpers_use_the_design_colours_and_escape_text() -> None:
@@ -470,6 +490,11 @@ def test_the_teacher_view_shows_the_banner_for_a_simulated_teacher(
     monkeypatch.setattr(api, "get_simulation", lambda url: SIMULATION)
     monkeypatch.setattr(
         api, "list_teachers", lambda url: [{"id": 1, "name": "Dr Rao"}, {"id": 2, "name": "Dr Sim", "simulated": True}]
+    )
+    monkeypatch.setattr(
+        api,
+        "get_teacher_feedback",
+        lambda url, teacher_id: {**NO_TEACHER_FEEDBACK, "teacher_id": teacher_id, "simulated": teacher_id == 2},
     )
     at = run_app()
     at.session_state["role"] = "Teacher"
