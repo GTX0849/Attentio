@@ -261,7 +261,9 @@ class PerceptionSource:
     frame with the locked face adds its raw pitch and yaw to the sample; when the time is
     up (and at least a few face frames were seen) the means become the zero. While
     calibrating, readings carry pitch 0 and yaw 0, so the person counts as looking
-    at the teacher, and the state rules receive them as usual. If nobody is in view,
+    at the teacher, and the state rules receive them as usual, marked `calibrating=True`
+    so that the front-region learner does not learn from the invented zero angles (the
+    reading that ends calibration already has the zero applied and is not marked). If nobody is in view,
     calibration simply keeps waiting for a face. If the face it locked onto is lost for
     longer than `face_lost_after_s` before calibration has finished, the lock and the
     samples so far are dropped and it locks onto the largest face again. The same happens
@@ -322,7 +324,15 @@ class PerceptionSource:
         """The scored person's Reading, plus what the preview needs to draw."""
         if frame is None:
             self._diagnostics = Diagnostics()
-            return Reading(timestamp=timestamp, face_present=False, shoulders_present=False), self._diagnostics
+            return (
+                Reading(
+                    timestamp=timestamp,
+                    face_present=False,
+                    shoulders_present=False,
+                    calibrating=self._calibration is not None,
+                ),
+                self._diagnostics,
+            )
         obs = self._backend.detect(frame, timestamp)
         st = self._settings
 
@@ -372,6 +382,8 @@ class PerceptionSource:
         )
 
         self._advance_calibration(timestamp, angles, paused=problem is not None)
+        # The reading that ends calibration already has the zero applied, so it is not a calibration reading.
+        calibrating = self._calibration is not None
         if angles is None:
             held = self._held
             if held is not None and not self._faces.locked_lost(timestamp):
@@ -384,11 +396,14 @@ class PerceptionSource:
                         pitch_deg=held.pitch_deg,
                         yaw_deg=held.yaw_deg,
                         eyes_closed=held.eyes_closed,
+                        calibrating=calibrating,
                     ),
                     self._diagnostics,
                 )
             return (
-                Reading(timestamp=timestamp, face_present=False, shoulders_present=shoulders),
+                Reading(
+                    timestamp=timestamp, face_present=False, shoulders_present=shoulders, calibrating=calibrating
+                ),
                 self._diagnostics,
             )
         assert locked_face is not None
@@ -406,6 +421,7 @@ class PerceptionSource:
                 pitch_deg=rel_pitch,
                 yaw_deg=rel_yaw,
                 eyes_closed=eyes_closed,
+                calibrating=calibrating,
             ),
             self._diagnostics,
         )

@@ -20,6 +20,7 @@ class Reading:
     pitch_deg: float = 0.0  # relative to calibration, positive = looking down; only meaningful with a face
     yaw_deg: float = 0.0  # relative to calibration; only meaningful with a face
     eyes_closed: bool = False
+    calibrating: bool = False  # taken while the person is calibrating (angles are forced to 0); never taught to the learner
 
 
 class ReadingSource(Protocol):

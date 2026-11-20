@@ -12,7 +12,8 @@ that cannot be read is skipped with a warning. Rows labelled 0 are ignored. Each
 
 What it does: with enough data (the minimums are in `tuning:` of config/classpulse.yaml) it works
 out the limits (worker/limits.py), writes `config/tuned/<camera>.yaml` (worker/tuned.py), keeps the
-last few earlier versions, draws `config/tuned/<camera>.html` and prints a summary. With too little
+last few earlier versions, draws `config/tuned/<camera>.html` (a local chart, git-ignored: it holds raw head-angle
+points) and prints a summary. With too little
 data it changes nothing and says what is missing.
 
 ONLY labelled tuning ever writes these files. The limits the worker learns during a lecture
@@ -274,7 +275,7 @@ def _footer(limits: TunedLimits, cfg: TuningConfig, written: Path | None, chart:
         lines.append("Dry run: nothing was written.")
     else:
         lines.append(f"Written: {written}")
-        lines.append(f"Chart: {chart}")
+        lines.append(f"Chart: {chart} (local only, not committed)")
     return lines
 
 

@@ -7,6 +7,7 @@ downward rules are fixed. Readings come at 10 a second, as in the worker.
 
 import math
 from collections.abc import Callable
+from dataclasses import replace
 
 import pytest
 
@@ -27,8 +28,8 @@ Angle = float | Callable[[float], float]  # constant, or a function of seconds s
 class Session:
     """Feeds one tracker a stream of readings and keeps the records it produces."""
 
-    def __init__(self) -> None:
-        self.tracker = AttentionTracker("CAM1", "STU001", 30, THRESHOLDS)
+    def __init__(self, thresholds: StateThresholds = THRESHOLDS) -> None:
+        self.tracker = AttentionTracker("CAM1", "STU001", 30, thresholds)
         self.t = 0.0
         self.records: list[AttentionRecord] = []
 
@@ -49,6 +50,7 @@ class Session:
                 pitch_deg=pitch(rel) if callable(pitch) else pitch,
                 yaw_deg=yaw(rel) if callable(yaw) else yaw,
                 eyes_closed=fields.get("eyes_closed", False),
+                calibrating=fields.get("calibrating", False),
             )
             self.records += self.tracker.observe(reading)
         self.t = start + seconds
@@ -65,6 +67,11 @@ class Session:
 
 def swing(amplitude: float, period_s: float, centre: float = 0.0) -> Callable[[float], float]:
     return lambda t: centre + amplitude * math.sin(2 * math.pi * t / period_s)
+
+
+def bursts(value: float, every_s: float = 20.0, for_s: float = 3.0) -> Callable[[float], float]:
+    """Mostly 0, with a burst at `value` for `for_s` of every `every_s` seconds (15 % of the time by default)."""
+    return lambda t: value if t % every_s < for_s else 0.0
 
 
 DEFAULT_EXTENTS = (-THRESHOLDS.pitch_attentive_min_deg, THRESHOLDS.yaw_max_deg)  # (30, 35)
@@ -181,6 +188,59 @@ def test_a_fidgety_student_gets_wider_extents_within_the_maximums() -> None:
     assert s.tracker.current_state(s.t) is AttentionState.ATTENTIVE
 
 
+# --- the camera's limits anchor the learned range ----------------------------------------
+
+TUNED = replace(THRESHOLDS, pitch_attentive_min_deg=-25, yaw_max_deg=45)  # a camera tuned to up 25, side 45
+
+
+def test_with_the_default_limits_the_learned_extents_never_pass_40_up_and_45_sideways() -> None:
+    s = Session()
+    s.feed(120, pitch=bursts(-22), yaw=swing(34, 7))  # looks up a lot and turns a lot, inside the 30 / 35 limits
+    assert s.tracker.extents() == (40, 45)  # the limit plus the 10 degree headroom (30 + 10, 35 + 10)
+
+
+def test_a_tuned_camera_limit_bounds_the_learned_extents_for_the_whole_lecture() -> None:
+    s = Session(TUNED)
+    assert s.tracker.extents() == (25, 45)  # until enough is learned the extents are the camera's limits
+    s.feed(300, pitch=bursts(-22), yaw=swing(25, 7))  # a fidgety student, inside the limits
+    assert s.tracker.extents() == (35, 55)  # 25 + 10 and 45 + 10: widened by the headroom, and no further
+
+
+def test_a_tuned_camera_still_tightens_a_still_student_to_the_minimums() -> None:
+    s = Session(TUNED)
+    s.feed(90, pitch=swing(1, 5), yaw=swing(1, 6))
+    assert s.tracker.extents() == (15, 15)
+
+
+def test_a_student_is_never_held_below_a_tuned_limit_by_the_old_fixed_caps() -> None:
+    wide = replace(THRESHOLDS, pitch_attentive_min_deg=-45, yaw_max_deg=50)  # the tuning maximums
+    s = Session(wide)
+    s.feed(300, pitch=bursts(-30), yaw=swing(30, 7))
+    up, side = s.tracker.extents()
+    assert up > 40 and side > 45  # more than the default caps: 45 + 10 and 50 + 10 are the ceilings
+    assert up <= 55 and side <= 60
+
+
+# --- calibration readings teach nothing --------------------------------------------------
+
+
+def test_calibration_readings_do_not_move_the_reference_or_the_spread() -> None:
+    s = Session()
+    s.feed(300, pitch=0, yaw=0, calibrating=True)  # what perception sends while calibrating: zero angles
+    assert s.tracker.reference() == (0, 0)
+    assert s.tracker.extents() == DEFAULT_EXTENTS  # nothing learned, however long it went on
+    s.feed(60, pitch=swing(1, 5, centre=-10), yaw=swing(1, 6, centre=8))  # then the real student
+    assert s.tracker.reference()[0] == pytest.approx(-10, abs=0.3)
+    assert s.tracker.reference()[1] == pytest.approx(8, abs=0.3)
+    assert s.tracker.extents() == (15, 15)  # the spread is theirs alone: calibration zeros did not widen it
+
+
+def test_calibration_readings_still_count_as_attentive_seconds() -> None:
+    s = Session()
+    s.feed(10, calibrating=True)
+    assert s.finish() == {"attentive": 10, "neutral": 0, "distracted": 0, "not_visible": 0}
+
+
 def test_a_still_student_gets_tighter_extents_down_to_the_minimums() -> None:
     s = Session()
     s.feed(90, pitch=swing(1, 5), yaw=swing(1, 6))
@@ -217,14 +277,14 @@ def test_resetting_the_learning_clears_the_reference_and_the_extents() -> None:
 # --- the profile behind its interface --------------------------------------------------
 
 
-def test_the_in_memory_profile_clamps_extents_to_the_maximums() -> None:
+def test_the_in_memory_profile_clamps_extents_to_the_camera_limit_plus_headroom() -> None:
     config = LearningConfig.from_config(CONFIG["states"]["learning"])
-    profile = InMemoryFrontRegionProfile(config)
+    profile = InMemoryFrontRegionProfile(config, up_limit_deg=25, side_limit_deg=45)
     assert profile.extents() is None
     for i in range(600):  # 60 s of readings spread widely around a median of zero
         angle = 50.0 * math.sin(i)
         profile.learn(i / HZ, angle, angle)
-    assert profile.extents() == (config.max_up_extent_deg, config.max_side_extent_deg)
+    assert profile.extents() == (25 + config.extent_headroom_deg, 45 + config.extent_headroom_deg)
     profile.reset()
     assert profile.extents() is None
     assert profile.reference() == (0, 0)

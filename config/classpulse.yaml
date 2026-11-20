@@ -39,11 +39,13 @@ states:
     max_reference_pitch_deg: 15  # the reference never moves further than this from calibration (pitch)
     max_reference_yaw_deg: 20    # ... or this (yaw)
     spread_percentile: 90        # personal spread = this percentile of |angle - reference| while Attentive
-    spread_multiplier: 2.5       # extent = clamp(this x spread, minimum, maximum)
-    min_up_extent_deg: 15        # how far up (above the reference) still counts as Attentive
-    max_up_extent_deg: 40
-    min_side_extent_deg: 15      # how far to either side of the reference still counts as Attentive
-    max_side_extent_deg: 45
+    spread_multiplier: 2.5       # extent = clamp(this x spread, minimum, the camera's limit + headroom)
+    # The camera's limit (pitch_attentive_min_deg for up, yaw_max_deg for sideways; the tuned values when the
+    # camera has a tuned file) anchors each student's range: it can tighten to the minimum or widen to the
+    # headroom beyond the camera's limit. With the defaults that is up to 40 up and 45 sideways.
+    min_up_extent_deg: 15        # how far up (above the reference) still counts as Attentive, at the least
+    min_side_extent_deg: 15      # how far to either side of the reference still counts as Attentive, at the least
+    extent_headroom_deg: 10      # a student's extents never exceed the camera's limit plus this
 
 # Per-camera auto-tuning from labelled tune sessions (worker/limits.py, worker/autotune.py).
 # Only labelled tuning ever changes a camera's limits; lecture learning never writes these files.
@@ -88,6 +90,7 @@ perception:
   invert_yaw: false              # flip the sign of yaw (it only matters for the absolute value, so rarely needed)
   max_faces: 5                   # most faces the face model looks for in a frame; only the locked (largest at calibration) one is scored
   max_poses: 5                   # most bodies the pose model looks for; shoulders come from the body inside the locked face's box
+  # Speed (development laptop, 640x480): about 8-10 readings a second with 5/5 and one or two people in view, about 13-15 with 1/1. Below 8 a second, lower both.
   face_lost_after_s: 1           # the locked face missing for longer than this counts as no face; it is never swapped for another
   # The calibration check. While calibrating, the countdown only runs (and samples are only kept) while ALL of these hold;
   # when one fails it starts over and the preview says why. Never applied after calibration has finished.

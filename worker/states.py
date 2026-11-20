@@ -47,8 +47,14 @@ Decisions on cases the ticket leaves open
 * A reading's band is fixed when it arrives, with the reference and extents as
   they were then. Learning from that reading changes later bands only, so
   seconds already counted are never rewritten.
-* Only readings that are Attentive (the state, not just the band) and have a
-  face teach the reference. `reset_learning` (recalibration) clears it.
+* Only readings that are Attentive (the state, not just the band), have a face and
+  were not taken while calibrating teach the reference (calibration readings carry
+  zero angles, which say nothing about the student). They are still classified and
+  counted as usual. `reset_learning` (recalibration) clears what was learned.
+* The camera's up and side limits are the anchor of what is learned: each student's
+  extents stay between the minimums and the camera's limit plus the headroom
+  (`states.learning.extent_headroom_deg`). The limits are the tuned ones when the
+  camera has a tuned file, so tuning bounds learning for the whole lecture.
 * A reading whose timestamp is earlier than the previous one (clock stepped
   back) is treated as if it arrived at the previous timestamp.
 """
@@ -117,7 +123,10 @@ class StateThresholds:
 class StateClassifier:
     def __init__(self, thresholds: StateThresholds, profile: FrontRegionProfile | None = None) -> None:
         self._th = thresholds
-        self._profile: FrontRegionProfile = profile or InMemoryFrontRegionProfile(thresholds.learning)
+        # The camera's limits (tuned or default) anchor the range each student's extents can learn.
+        self._profile: FrontRegionProfile = profile or InMemoryFrontRegionProfile(
+            thresholds.learning, -thresholds.pitch_attentive_min_deg, thresholds.yaw_max_deg
+        )
         self._held: Reading | None = None  # the reading currently being held
         self._held_band: AttentionState = _DIS  # its head-direction band, fixed when it arrived
         self._now = 0.0  # time up to which transitions have been emitted
@@ -142,7 +151,7 @@ class StateClassifier:
         if state is _ATT:
             if self._attentive_since is None:
                 self._attentive_since = t
-            if reading.face_present:  # learn after classifying: this reading's band is already fixed
+            if reading.face_present and not reading.calibrating:  # learn after classifying: the band is already fixed
                 self._profile.learn(t, reading.pitch_deg, reading.yaw_deg)
         else:
             self._attentive_since = None

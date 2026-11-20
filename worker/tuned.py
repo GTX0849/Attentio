@@ -1,9 +1,10 @@
 """A camera's tuned limits: the small YAML file auto-tuning writes and the worker reads at start-up.
 
-Layout (the folder is committed and shared between machines on purpose, so it is NOT git-ignored):
+Layout (the limits file and its history are committed and shared between machines on purpose; the chart is
+local only and git-ignored, because it holds up to 6000 raw head-angle points from the tuning runs):
 
     config/tuned/<safe camera id>.yaml           the live file; delete it to go back to the defaults
-    config/tuned/<safe camera id>.html           the chart made with it (worker/autotune.py)
+    config/tuned/<safe camera id>.html           the chart made with it (worker/autotune.py); local only
     config/tuned/history/<safe camera id>/<stamp>.yaml
                                                  the last few versions it replaced; copy one back to undo a tune
 

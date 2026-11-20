@@ -69,9 +69,8 @@ def test_the_thresholds_come_from_the_yaml_config() -> None:
             spread_percentile=90,
             spread_multiplier=2.5,
             min_up_extent_deg=15,
-            max_up_extent_deg=40,
             min_side_extent_deg=15,
-            max_side_extent_deg=45,
+            extent_headroom_deg=10,
         ),
     )
 

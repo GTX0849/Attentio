@@ -10,3 +10,7 @@ __pycache__/
 
 # MediaPipe model files (python -m worker.models download)
 models/
+
+# Tuning charts hold raw head-angle points from tuning runs: local only, never committed.
+# The small limits YAML and its history in config/tuned/ stay committable.
+config/tuned/*.html

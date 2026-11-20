@@ -17,13 +17,27 @@ What is learned (all per student, all from head pitch and yaw relative to calibr
   default) of |angle - reference| over the same samples, kept separately for
   pitch (the up extent) and yaw (the sideways extent). A percentile is robust:
   one stray reading cannot widen it.
-* Extents: extent = clamp(`spread_multiplier` x spread, minimum, maximum), with
-  its own minimum and maximum for up and for sideways. The extents are how far
-  up and how far to either side of the reference still counts as Attentive.
+* Extents: extent = clamp(`spread_multiplier` x spread, minimum, L + headroom),
+  separately for up and for sideways. L is the camera's limit (see below), the
+  minimum is `min_up_extent_deg` / `min_side_extent_deg` and the headroom is
+  `extent_headroom_deg`. The extents are how far up and how far to either side
+  of the reference still counts as Attentive.
+
+The camera's limit L anchors the learned range: it is the up limit
+(`pitch_attentive_min_deg`) and the side limit (`yaw_max_deg`) of the camera's
+thresholds, which are the tuned values when the camera has a tuned file (see
+worker/tuned.py) and the config defaults otherwise. The profile is given them
+when it is made (`up_limit_deg`, `side_limit_deg`; `StateClassifier` passes the
+thresholds'), so each student's range can tighten to the minimum or widen to the
+headroom beyond the camera's limit, and a tuned limit is never cut back by
+learning.
 
 Until `min_attentive_s` seconds of Attentive data are in the window nothing is
 learned: the reference stays at calibration (0, 0) and the extents are the
-camera's limits from the config (`pitch_attentive_min_deg`, `yaw_max_deg`).
+camera's limits L.
+
+Readings taken while the person is calibrating are never passed to `learn`
+(`StateClassifier` leaves them out): their zero angles say nothing about the student.
 
 What is never learned: the downward limits (Attentive up to +15, Neutral up to
 +38, the look-down allowance and its refill). They stay fixed, measured from the
@@ -57,11 +71,10 @@ class LearningConfig:
     max_reference_pitch_deg: float  # the reference stays within +/- this of calibration (pitch)
     max_reference_yaw_deg: float  # ... and this (yaw)
     spread_percentile: float  # which percentile of |angle - reference| is the spread (0 to 100)
-    spread_multiplier: float  # k in extent = clamp(k x spread, minimum, maximum)
-    min_up_extent_deg: float
-    max_up_extent_deg: float
-    min_side_extent_deg: float
-    max_side_extent_deg: float
+    spread_multiplier: float  # k in extent = clamp(k x spread, minimum, camera limit + headroom)
+    min_up_extent_deg: float  # a student's up extent never gets tighter than this
+    min_side_extent_deg: float  # ... nor the sideways extent than this
+    extent_headroom_deg: float  # a student's extents never get wider than the camera's limit plus this
 
     @classmethod
     def from_config(cls, section: dict[str, Any]) -> "LearningConfig":
@@ -94,8 +107,11 @@ class FrontRegionProfile(Protocol):
 class InMemoryFrontRegionProfile:
     """The only implementation for now: lives in memory and is discarded at session end."""
 
-    def __init__(self, config: LearningConfig) -> None:
+    def __init__(self, config: LearningConfig, up_limit_deg: float, side_limit_deg: float) -> None:
+        """`up_limit_deg` and `side_limit_deg` are the camera's limits (positive degrees): the anchor of the learned range."""
         self._cfg = config
+        self._max_up = up_limit_deg + config.extent_headroom_deg
+        self._max_side = side_limit_deg + config.extent_headroom_deg
         # (timestamp, pitch, yaw, seconds of data this sample stands for)
         self._samples: deque[tuple[float, float, float, float]] = deque()
         self._reset_state()
@@ -142,8 +158,8 @@ class InMemoryFrontRegionProfile:
         spread_pitch = _percentile([abs(p - ref_pitch) for p in pitches], cfg.spread_percentile)
         spread_yaw = _percentile([abs(y - ref_yaw) for y in yaws], cfg.spread_percentile)
         self._extents = (
-            _clamp(cfg.spread_multiplier * spread_pitch, cfg.min_up_extent_deg, cfg.max_up_extent_deg),
-            _clamp(cfg.spread_multiplier * spread_yaw, cfg.min_side_extent_deg, cfg.max_side_extent_deg),
+            _clamp(cfg.spread_multiplier * spread_pitch, cfg.min_up_extent_deg, self._max_up),
+            _clamp(cfg.spread_multiplier * spread_yaw, cfg.min_side_extent_deg, self._max_side),
         )
 
 

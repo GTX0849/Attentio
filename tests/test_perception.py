@@ -203,6 +203,34 @@ def test_readings_during_calibration_are_relative_zero_and_it_ends_after_the_con
     assert source.calibration_remaining(103.0) == 0.0
 
 
+def test_readings_are_marked_as_calibrating_only_while_calibrating() -> None:
+    backend = FakeBackend()
+    backend.face(pitch=10, yaw=-4)
+    source = PerceptionSource(backend, SETTINGS)
+    during = [source.read(FRAME, 100.0 + i * 0.1) for i in range(30)]  # 0 to 2.9 s of a 3 s calibration
+    assert source.calibrating
+    assert all(r.calibrating for r in during)
+    for i in range(30, 34):  # the countdown ends at 3.0 s
+        last = source.read(FRAME, 100.0 + i * 0.1)
+    assert not source.calibrating
+    assert not last.calibrating  # taught to the learner like any other reading
+    assert not source.read(FRAME, 110.0).calibrating
+    assert not source.read(None, 111.0).calibrating  # no camera frame
+    source.recalibrate()
+    assert source.read(FRAME, 120.0).calibrating  # recalibrating marks them again
+
+
+def test_a_short_dropout_during_calibration_is_still_marked_as_calibrating() -> None:
+    backend = FakeBackend()
+    backend.face(pitch=10, yaw=-4)
+    source = PerceptionSource(backend, SETTINGS)
+    source.read(FRAME, 100.0)
+    backend.next = RawObservation(faces=(), poses=())
+    held = source.read(FRAME, 100.2)  # the face vanishes for a moment: the last reading is kept
+    assert held.face_present
+    assert held.calibrating
+
+
 def test_after_calibration_angles_are_relative_to_the_mean_calibration_pose() -> None:
     backend = FakeBackend()
     source = PerceptionSource(backend, SETTINGS)
