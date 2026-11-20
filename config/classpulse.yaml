@@ -71,6 +71,13 @@ perception:
   max_faces: 5                   # most faces the face model looks for in a frame; only the locked (largest at calibration) one is scored
   max_poses: 5                   # most bodies the pose model looks for; shoulders come from the body inside the locked face's box
   face_lost_after_s: 1           # the locked face missing for longer than this counts as no face; it is never swapped for another
+  # The calibration check. While calibrating, the countdown only runs (and samples are only kept) while ALL of these hold;
+  # when one fails it starts over and the preview says why. Never applied after calibration has finished.
+  calibration_min_size_ratio: 2.0    # the scored face's area is at least this many times the area of every other face
+  calibration_min_in_frame: 0.98     # share of the face's landmark points inside the picture (1.0 = fully in frame)
+  calibration_min_face_width: 0.12   # face box width as a share of the picture width
+  calibration_max_wobble_deg: 2.0    # "Steady" (std of raw head pitch and yaw over steady_window_s) within +/- this
+  steady_window_s: 1.0               # how far back the "Steady" readout looks, in seconds
 
 # Simulated classroom history (python -m simulator seed). Effects are in attention points
 # (percentage points of attention, attentive / (attentive + distracted)).

@@ -5,6 +5,7 @@ so everything here runs on plain numbers.
 """
 
 import math
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -116,6 +117,12 @@ class PerceptionSettings:
     max_faces: int = 5  # most faces and bodies the models look for in a frame
     max_poses: int = 5
     face_lost_after_s: float = 1.0  # the scored face missing longer than this counts as no face
+    # The calibration check (only while calibrating): the countdown runs only while all of these hold.
+    calibration_min_size_ratio: float = 2.0  # the scored face's area is at least this many times any other face's
+    calibration_min_in_frame: float = 0.98  # share of the face's landmark points inside the picture
+    calibration_min_face_width: float = 0.12  # face box width as a share of the picture width
+    calibration_max_wobble_deg: float = 2.0  # steadiness (see steady_window_s) must be within +/- this
+    steady_window_s: float = 1.0  # the "Steady" readout looks at the raw head angles over this long
 
     @classmethod
     def from_config(cls, raw: dict[str, Any]) -> "PerceptionSettings":
@@ -136,6 +143,11 @@ class PerceptionSettings:
             max_faces=_positive_int(s["max_faces"], "perception.max_faces"),
             max_poses=_positive_int(s["max_poses"], "perception.max_poses"),
             face_lost_after_s=float(s["face_lost_after_s"]),
+            calibration_min_size_ratio=float(s["calibration_min_size_ratio"]),
+            calibration_min_in_frame=float(s["calibration_min_in_frame"]),
+            calibration_min_face_width=float(s["calibration_min_face_width"]),
+            calibration_max_wobble_deg=float(s["calibration_max_wobble_deg"]),
+            steady_window_s=float(s["steady_window_s"]),
         )
 
 
@@ -153,11 +165,11 @@ class FaceDiagnostic:
 
 @dataclass(frozen=True)
 class FramingReadout:
-    """How well the scored person is framed. Filled in by CLA-19; None until then."""
+    """How well the scored person is framed, from the landmark points alone (MediaPipe gives no confidence)."""
 
-    in_frame_pct: float
-    size_pct: float
-    steady_deg: float
+    in_frame_pct: float  # share of the face's landmark points inside the picture, 0 to 100
+    size_pct: float  # the face box width as a share of the picture width, 0 to 100
+    steady_deg: float  # spread of the raw head pitch and yaw over the last second (see `_steadiness`)
 
 
 @dataclass(frozen=True)
@@ -166,8 +178,9 @@ class Diagnostics:
 
     faces: tuple[FaceDiagnostic, ...] = ()
     shoulders: tuple[tuple[float, float], tuple[float, float]] | None = None  # locked pose's (left, right) points
-    framing: FramingReadout | None = None  # CLA-19: the "In frame / Size / Steady" readout line
-    calibration_reason: str | None = None  # CLA-19: why calibration is waiting; None shows "Calibrating"
+    framing: FramingReadout | None = None  # the "In frame / Size / Steady" line; None with no locked face in view
+    calibration_reason: str | None = None  # why the calibration countdown is paused; None shows "Calibrating"
+    calibration_detail: str | None = None  # the white line under it: what is wrong and what is needed
 
     @property
     def face_count(self) -> int:
@@ -183,6 +196,35 @@ class Diagnostics:
 
 
 MIN_CALIBRATION_SAMPLES = 5  # face frames needed before a calibration may finish
+
+# Why the calibration countdown can pause, most important first.
+REASON_ANOTHER_FACE = "Another face is about as close as you"
+REASON_OFF_CENTRE = "Centre your face"
+REASON_TOO_FAR = "Move closer"
+REASON_MOVING = "Hold still"
+
+
+def _steadiness(samples: deque[tuple[float, float, float]]) -> float:
+    """The larger of the standard deviations (population) of raw pitch and yaw, in degrees.
+
+    One standard deviation rather than max minus min, so that a single noisy frame does not
+    decide it. 0 with fewer than two samples.
+    """
+    if len(samples) < 2:
+        return 0.0
+    angles = np.array([(p, y) for _, p, y in samples])
+    return float(angles.std(axis=0).max())
+
+
+def _framing(face: FaceObservation, steady_deg: float) -> FramingReadout:
+    xs, ys = face.landmarks[:, 0], face.landmarks[:, 1]
+    inside = (xs >= 0.0) & (xs <= 1.0) & (ys >= 0.0) & (ys <= 1.0)
+    box = face.box
+    return FramingReadout(
+        in_frame_pct=float(inside.mean()) * 100.0,
+        size_pct=(box.x1 - box.x0) * 100.0,
+        steady_deg=steady_deg,
+    )
 SWITCH_AREA_FACTOR = 1.5  # during calibration a face this much larger than the locked one takes the lock
 
 
@@ -226,6 +268,15 @@ class PerceptionSource:
     if, during calibration, a face more than 1.5 times the area of the locked one appears
     (the person nearest the camera is usually the one who was not detected in the first frame).
     After calibration the lock is never moved by size.
+
+    Quality: with a locked face in view every frame's diagnostics carry a `FramingReadout`
+    (in frame, size, steady; all from the landmark points). During calibration only, the
+    countdown also needs the scored face to be at least `calibration_min_size_ratio` times the
+    area of every other face, in frame to `calibration_min_in_frame`, at least
+    `calibration_min_face_width` of the picture wide and steady within
+    `calibration_max_wobble_deg`. When one fails the countdown and the samples collected so far
+    are thrown away (so the zero is made only from good frames), and the diagnostics say why
+    (the first failing one, in that order). After calibration none of this is looked at.
     """
 
     def __init__(self, backend: Backend, settings: PerceptionSettings) -> None:
@@ -236,6 +287,8 @@ class PerceptionSource:
         self._faces = FaceTracker(settings.face_lost_after_s)
         self._held: _FaceReading | None = None  # last reading of the locked face
         self._diagnostics = Diagnostics()
+        self._angle_history: deque[tuple[float, float, float]] = deque()  # (time, raw pitch, raw yaw), locked face
+        self._history_id: int | None = None  # the track the history belongs to
 
     @property
     def calibrating(self) -> bool:
@@ -251,6 +304,7 @@ class PerceptionSource:
         self._calibration = _Calibration()
         self._faces.unlock()
         self._held = None
+        self._angle_history.clear()
 
     def calibration_remaining(self, timestamp: float) -> float:
         """Seconds of calibration left at `timestamp` (0 when not calibrating)."""
@@ -303,9 +357,21 @@ class PerceptionSource:
                     yaw_deg=raw[1] if raw else None,
                 )
             )
-        self._diagnostics = Diagnostics(faces=tuple(faces), shoulders=shoulder_points)
+        framing = self._framing(locked_face, self._faces.locked_id, timestamp)
+        problem = (
+            self._calibration_problem(obs.faces, locked_index, framing)
+            if self._calibration is not None and framing is not None and locked_index is not None
+            else None
+        )
+        self._diagnostics = Diagnostics(
+            faces=tuple(faces),
+            shoulders=shoulder_points,
+            framing=framing,
+            calibration_reason=problem[0] if problem else None,
+            calibration_detail=problem[1] if problem else None,
+        )
 
-        self._advance_calibration(timestamp, angles)
+        self._advance_calibration(timestamp, angles, paused=problem is not None)
         if angles is None:
             held = self._held
             if held is not None and not self._faces.locked_lost(timestamp):
@@ -386,9 +452,62 @@ class PerceptionSource:
         points = (best.point(POSE_LEFT_SHOULDER), best.point(POSE_RIGHT_SHOULDER)) if present else None
         return present, points
 
-    def _advance_calibration(self, timestamp: float, angles: tuple[float, float] | None) -> None:
+    def _framing(self, face: FaceObservation | None, track_id: int | None, timestamp: float) -> FramingReadout | None:
+        """The locked face's readout (None when it is not in view), updating the steadiness history."""
+        if face is None:
+            return None
+        if self._history_id != track_id:  # a different person: their wobble is not this one's
+            self._angle_history.clear()
+            self._history_id = track_id
+        raw = self._raw_angles(face)
+        if raw is not None:
+            self._angle_history.append((timestamp, raw[0], raw[1]))
+        horizon = self._settings.steady_window_s + 1e-9
+        while self._angle_history and timestamp - self._angle_history[0][0] > horizon:
+            self._angle_history.popleft()
+        return _framing(face, _steadiness(self._angle_history))
+
+    def _calibration_problem(
+        self, faces: tuple[FaceObservation, ...], locked_index: int, framing: FramingReadout
+    ) -> tuple[str, str] | None:
+        """(reason, detail) for the first failing calibration condition, or None when all hold."""
+        st = self._settings
+        area = faces[locked_index].box.area
+        biggest_other = max((f.box.area for i, f in enumerate(faces) if i != locked_index), default=0.0)
+        if biggest_other > 0 and area < st.calibration_min_size_ratio * biggest_other:
+            return (
+                REASON_ANOTHER_FACE,
+                f"Calibration paused - your face is only {area / biggest_other:.1f}x the area of the nearest"
+                f" other face, needs {st.calibration_min_size_ratio:.1f}x",
+            )
+        if framing.in_frame_pct < st.calibration_min_in_frame * 100.0 - 1e-9:
+            return (
+                REASON_OFF_CENTRE,
+                f"Calibration paused - {framing.in_frame_pct:.0f}% of your face is in the picture,"
+                f" needs {st.calibration_min_in_frame * 100:.0f}%",
+            )
+        if framing.size_pct < st.calibration_min_face_width * 100.0 - 1e-9:
+            return (
+                REASON_TOO_FAR,
+                f"Calibration paused - face is {framing.size_pct:.0f}% of the picture width,"
+                f" needs {st.calibration_min_face_width * 100:.0f}%",
+            )
+        if framing.steady_deg > st.calibration_max_wobble_deg + 1e-9:
+            return (
+                REASON_MOVING,
+                f"Calibration paused - head moving +/-{framing.steady_deg:.1f} deg,"
+                f" needs under +/-{st.calibration_max_wobble_deg:.1f} deg for {st.calibration_seconds:.0f} s",
+            )
+        return None
+
+    def _advance_calibration(self, timestamp: float, angles: tuple[float, float] | None, paused: bool) -> None:
         c = self._calibration
         if c is None:
+            return
+        if paused:  # the check failed: the countdown and the samples start again once it clears
+            c.started_at = None
+            c.pitches.clear()
+            c.yaws.clear()
             return
         if c.started_at is None:
             c.started_at = timestamp

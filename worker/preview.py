@@ -42,6 +42,9 @@ _HINTS_H = 36
 _MARGIN = 16
 _MIN_SCALE = 0.6  # so a small webcam frame still gets readable text
 _ARROW_LENGTH = 90
+_NORMAL_FACE_WIDTH = 0.18  # a face this share of the picture width gets the design sizes below
+_MIN_FACE_FACTOR = 0.35  # smaller faces get dots, ring and arrow down to this fraction of the design size, no less
+_MIN_DOT_RADIUS = 2  # px: the smallest key-point dot
 
 
 def state_bgr(state: AttentionState) -> tuple[int, int, int]:
@@ -119,7 +122,10 @@ def draw_preview(
     _draw_key_hints(out, recalibrate_key, landmarks_key if diagnostics is not None else None, scale)
     if calibration_left_s is not None:
         headline = diagnostics.calibration_reason if diagnostics and diagnostics.calibration_reason else "Calibrating"
-        _draw_calibration_message(out, headline, calibration_left_s, scale)
+        detail = diagnostics.calibration_detail if diagnostics and diagnostics.calibration_reason else None
+        if detail is None:
+            detail = f"Look at the teacher and hold still - {calibration_left_s:.1f} s left"
+        _draw_calibration_message(out, headline, detail, scale)
     return out
 
 
@@ -232,9 +238,8 @@ def _draw_key_hints(out: Any, recalibrate_key: str | None, landmarks_key: str | 
     )
 
 
-def _draw_calibration_message(out: Any, headline: str, calibration_left_s: float, scale: float) -> None:
+def _draw_calibration_message(out: Any, headline: str, detail: str, scale: float) -> None:
     height, width = out.shape[:2]
-    detail = f"Look at the teacher and hold still - {calibration_left_s:.1f} s left"
     head_scale, detail_scale = 0.85 * scale, 0.6 * scale
     head_w, head_h = _text_size(headline, _FONT, head_scale, max(1, round(2 * scale)))
     detail_w, detail_h = _text_size(detail, _FONT, detail_scale, 1)
@@ -288,13 +293,22 @@ def _draw_overlay(
         # the frame was mirrored, so x runs the other way
         xs = np.round((1.0 - tracked.landmarks[:, 0]) * width).astype(int)
         ys = np.round(tracked.landmarks[:, 1] * height).astype(int)
+        # dots, ring and arrow shrink with a small, distant face so they do not cover it
+        face_scale = scale * _face_factor(tracked)
         _draw_contours(out, xs, ys, colour, line)
-        _draw_irises(out, xs, ys, colour, scale)
+        _draw_irises(out, xs, ys, colour, face_scale)
     if diagnostics.shoulders is not None:
         _draw_shoulders(out, diagnostics.shoulders, colour, line, scale)
     if tracked is not None:
-        _draw_arrow(out, xs, ys, tracked, colour, line, scale)
-        _draw_key_points(out, xs, ys, colour, scale)
+        _draw_arrow(out, xs, ys, tracked, colour, line, face_scale)
+        _draw_key_points(out, xs, ys, colour, face_scale)
+
+
+def _face_factor(face: FaceDiagnostic) -> float:
+    """How big the key points and arrow are, relative to the design: 1 for a face 18% of the picture
+    wide or more, shrinking in proportion down to 0.35 for a very small one."""
+    width = face.box.x1 - face.box.x0
+    return min(1.0, max(_MIN_FACE_FACTOR, width / _NORMAL_FACE_WIDTH))
 
 
 def _draw_box(
@@ -345,7 +359,7 @@ def _draw_contours(out: Any, xs: Any, ys: Any, colour: tuple[int, int, int], lin
 
 
 def _draw_irises(out: Any, xs: Any, ys: Any, colour: tuple[int, int, int], scale: float) -> None:
-    r = _px(3, scale)
+    r = max(1, _px(3, scale))
     for i in face_mesh.IRIS_CENTRES:
         if i < len(xs):
             cv2.circle(out, (int(xs[i]), int(ys[i])), r + 1, _OUTLINE, -1, cv2.LINE_AA)
@@ -353,8 +367,8 @@ def _draw_irises(out: Any, xs: Any, ys: Any, colour: tuple[int, int, int], scale
 
 
 def _draw_key_points(out: Any, xs: Any, ys: Any, colour: tuple[int, int, int], scale: float) -> None:
-    r = _px(6, scale)
-    ring = _px(2, scale)
+    r = max(_MIN_DOT_RADIUS, round(6 * scale))
+    ring = max(1, round(2 * scale))
     for i in face_mesh.KEY_POINTS:
         if i < len(xs):
             c = (int(xs[i]), int(ys[i]))

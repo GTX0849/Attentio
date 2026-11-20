@@ -234,7 +234,15 @@ def test_a_slightly_larger_face_during_calibration_does_not_steal_the_lock() -> 
     backend = FakeBackend()
     source = PerceptionSource(backend, SETTINGS)
     run(source, backend, 400.0, 1.0, [face_obs(*FRONT, size=0.25, pitch=10), face_obs(*TEACHER_SIDE, size=0.2, pitch=-30)])
-    run(source, backend, 401.0, 3.0, [face_obs(*FRONT, size=0.25, pitch=10), face_obs(*TEACHER_SIDE, size=0.26, pitch=-30)])
-    assert not source.calibrating  # no restart: the first lock held
+    both = [face_obs(*FRONT, size=0.25, pitch=10), face_obs(*TEACHER_SIDE, size=0.26, pitch=-30)]
+    run(source, backend, 401.0, 3.0, both)
+    # the first lock held. The calibration check holds the countdown while another face is as close
+    # (it used to run on regardless), so it is still waiting and says why.
+    assert source.calibrating
+    assert source.diagnostics.calibration_reason == "Another face is about as close as you"
+    assert source.diagnostics.tracked is not None and source.diagnostics.tracked.box.centre == pytest.approx(FRONT)
+    # once the other face is clearly smaller, calibration finishes on the person who was locked first
+    run(source, backend, 404.0, 3.5, [face_obs(*FRONT, size=0.25, pitch=10), face_obs(*TEACHER_SIDE, size=0.1, pitch=-30)])
+    assert not source.calibrating
     scene(backend, [face_obs(*FRONT, size=0.25, pitch=25), face_obs(*TEACHER_SIDE, size=0.26, pitch=-30)])
-    assert source.read(FRAME, 404.1).pitch_deg == pytest.approx(15.0)
+    assert source.read(FRAME, 408.0).pitch_deg == pytest.approx(15.0)

@@ -289,3 +289,8 @@ def test_settings_are_read_from_the_perception_section_of_the_config() -> None:
     assert settings.shoulder_visibility_threshold == 0.5
     assert settings.invert_pitch is False and settings.invert_yaw is False
     assert settings.face_model.endswith("face_landmarker.task")
+    assert settings.calibration_min_size_ratio == 2.0
+    assert settings.calibration_min_in_frame == 0.98
+    assert settings.calibration_min_face_width == 0.12
+    assert settings.calibration_max_wobble_deg == 2.0
+    assert settings.steady_window_s == 1.0

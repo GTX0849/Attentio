@@ -119,3 +119,74 @@ def test_without_diagnostics_nothing_about_faces_is_drawn_and_the_landmarks_hint
     with_hint = draw_preview(frame, reading, AttentionState.ATTENTIVE, 8.0, None, diagnostics=Diagnostics(), recalibrate_key=None)
     # the hints bar is shorter without the "m landmarks" hint
     assert bright(out[684:]) < bright(with_hint[684:])
+
+
+# -- the key points and arrow scale with the face ------------------------------------
+
+WHITE = (255, 255, 255)
+
+
+def tracked_only(x0: float, y0: float, x1: float, y1: float) -> Diagnostics:
+    """One tracked face, looking well down so its arrow points straight down the picture at full length."""
+    face = face_diag(2, x0, y0, x1, y1, tracked=True)
+    return Diagnostics(faces=(FaceDiagnostic(2, face.box, face.landmarks, True, 30.0, 0.0),))
+
+
+def white_key_point_pixels(out: np.ndarray, x0: float, y0: float, x1: float, y1: float) -> int:
+    """White pixels (the centres of the key-point dots) inside the face's box, mirrored picture."""
+    h, w = out.shape[:2]
+    region = out[round(y0 * h) : round(y1 * h), round((1 - x1) * w) : round((1 - x0) * w)]
+    return count_pixels(region, WHITE)
+
+
+def test_a_small_distant_face_gets_small_key_points_so_it_stays_visible() -> None:
+    frame = np.zeros((720, 1280, 3), np.uint8)
+    reading = Reading(timestamp=1.0, face_present=True, shoulders_present=False)
+    small = draw_preview(frame, reading, None, 8.0, 2.1, diagnostics=tracked_only(0.45, 0.4, 0.51, 0.5))
+    normal = draw_preview(frame, reading, None, 8.0, 2.1, diagnostics=tracked_only(0.40, 0.25, 0.60, 0.65))
+    # six dots with a white centre of radius 4 px at full size; a face 6% wide gets far less than that
+    assert white_key_point_pixels(normal, 0.40, 0.25, 0.60, 0.65) > 200  # the existing look
+    assert white_key_point_pixels(small, 0.45, 0.4, 0.51, 0.5) < 120
+    assert white_key_point_pixels(small, 0.45, 0.4, 0.51, 0.5) > 0  # but still there
+
+
+def test_the_arrow_on_a_small_face_does_not_leave_the_face_box() -> None:
+    frame = np.zeros((720, 1280, 3), np.uint8)
+    reading = Reading(timestamp=1.0, face_present=True, shoulders_present=False)
+    # 6% wide, 14% tall (100 px): a fixed 90 px arrow from the nose (the box centre) would end well below it
+    out = draw_preview(frame, reading, None, 8.0, 2.1, diagnostics=tracked_only(0.45, 0.4, 0.51, 0.54))
+    bottom = round(0.54 * 720)
+    below = out[bottom + 6 : bottom + 100, round((1 - 0.51) * 1280) - 20 : round((1 - 0.45) * 1280) + 20]
+    assert count_pixels(below, CALIBRATING_BGR) == 0
+
+
+def test_a_calibration_message_with_a_reason_and_a_detail_line() -> None:
+    frame = np.zeros((720, 1280, 3), np.uint8)
+    reading = Reading(timestamp=1.0, face_present=True, shoulders_present=True)
+    detail = "Calibration paused - head moving +/-3.8 deg, needs under +/-2.0 deg for 3 s"
+    paused = Diagnostics(calibration_reason="Hold still", calibration_detail=detail)
+    plain = draw_preview(frame, reading, None, 8.0, 3.0, diagnostics=Diagnostics())
+    with_reason = draw_preview(frame, reading, None, 8.0, 3.0, diagnostics=paused)
+    assert with_reason.shape == frame.shape
+    panel = (slice(60, 135), slice(300, 980))  # the message panel under the banner
+    assert (with_reason[panel] != plain[panel]).any()
+    assert bright(with_reason[96:132, 300:980]) > 100  # the white detail line is drawn
+    no_detail = draw_preview(frame, reading, None, 8.0, 3.0, diagnostics=Diagnostics(calibration_reason="Hold still"))
+    row = (slice(98, 130), slice(300, 980))  # the detail line: the given text replaces "Look at the teacher ..."
+    assert (with_reason[row] != no_detail[row]).any()
+    # the headline is yellow in both; the reason's headline replaces "Calibrating"
+    assert count_pixels(with_reason[60:100, 300:980], CALIBRATING_BGR) > 0
+    # a long detail on a small frame still draws
+    small = draw_preview(np.zeros((360, 640, 3), np.uint8), reading, None, 8.0, 3.0, diagnostics=paused)
+    assert small.shape == (360, 640, 3)
+
+
+def test_the_quality_line_is_in_the_readout_panel() -> None:
+    from worker.perception import FramingReadout
+
+    frame = np.zeros((720, 1280, 3), np.uint8)
+    reading = Reading(timestamp=1.0, face_present=True, shoulders_present=True)
+    without = draw_preview(frame, reading, AttentionState.ATTENTIVE, 8.0, None, diagnostics=Diagnostics())
+    framed = Diagnostics(framing=FramingReadout(100.0, 18.0, 0.9))
+    with_line = draw_preview(frame, reading, AttentionState.ATTENTIVE, 8.0, None, diagnostics=framed)
+    assert bright(with_line[480:660, :600]) > bright(without[480:660, :600])  # one more line of text
