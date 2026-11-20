@@ -53,12 +53,15 @@ Decisions on cases the ticket leaves open
   back) is treated as if it arrived at the previous timestamp.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC
+from pathlib import Path
 from typing import Any
 
 from shared.schema import AttentionState
 from worker.front_region import FrontRegionProfile, InMemoryFrontRegionProfile, LearningConfig
 from worker.readings import Reading
+from worker.tuned import TUNED_DIR, TunedFile, load_tuned
 
 # A state that starts at a time and holds until the next transition.
 Transition = tuple[float, AttentionState]
@@ -79,13 +82,36 @@ class StateThresholds:
     look_down_allowance_s: float
     allowance_refill_s: float
     learning: LearningConfig
+    tuned: TunedFile | None = field(default=None, compare=False)  # the camera's tuned file, when the limits came from one
 
     @classmethod
-    def from_config(cls, raw: dict[str, Any]) -> "StateThresholds":
-        """Read the top-level `states:` section of config/classpulse.yaml."""
+    def from_config(
+        cls, raw: dict[str, Any], camera_id: str | None = None, tuned_dir: Path = TUNED_DIR
+    ) -> "StateThresholds":
+        """Read the top-level `states:` section of config/classpulse.yaml.
+
+        With a `camera_id`, that camera's tuned file (config/tuned/<camera>.yaml, see worker/tuned.py)
+        replaces the up limit, side limit and note/phone boundary when it exists. Nothing else changes,
+        and other cameras are not affected. Only labelled tuning writes that file: the limits learned
+        during a lecture (worker/front_region.py) never do.
+        """
         section = raw["states"]
-        numbers = {name: float(section[name]) for name in cls.__dataclass_fields__ if name != "learning"}
-        return cls(**numbers, learning=LearningConfig.from_config(section["learning"]))
+        names = ("pitch_attentive_min_deg", "pitch_attentive_max_deg", "pitch_neutral_max_deg", "yaw_max_deg")
+        tuned = load_tuned(camera_id, tuned_dir) if camera_id is not None else None
+        limits = {name: float(section[name]) for name in names}
+        if tuned is not None:
+            limits.update(tuned.values)
+        return cls(
+            pitch_attentive_min_deg=limits["pitch_attentive_min_deg"],
+            pitch_attentive_max_deg=limits["pitch_attentive_max_deg"],
+            pitch_neutral_max_deg=limits["pitch_neutral_max_deg"],
+            yaw_max_deg=limits["yaw_max_deg"],
+            eyes_closed_grace_s=float(section["eyes_closed_grace_s"]),
+            look_down_allowance_s=float(section["look_down_allowance_s"]),
+            allowance_refill_s=float(section["allowance_refill_s"]),
+            learning=LearningConfig.from_config(section["learning"]),
+            tuned=tuned,
+        )
 
 
 class StateClassifier:
@@ -243,3 +269,16 @@ class StateClassifier:
         if band is _NEU and x >= s + (th.look_down_allowance_s - self._down_used):
             return _DIS
         return band
+
+
+def limits_message(thresholds: StateThresholds, camera_id: str) -> str:
+    """The start-up line saying whether this camera uses tuned limits or the defaults, and the values."""
+    numbers = (
+        f"up {-thresholds.pitch_attentive_min_deg:.1f}, side {thresholds.yaw_max_deg:.1f}, "
+        f"notes/phone boundary {thresholds.pitch_neutral_max_deg:.1f} degrees"
+    )
+    tuned = thresholds.tuned
+    if tuned is None:
+        return f"Using the default limits for {camera_id} (no tuned file): {numbers}."
+    made = tuned.created.astimezone(UTC).strftime("%Y-%m-%d")
+    return f"Using tuned limits for {camera_id} from {tuned.path} (made {made}): {numbers}."

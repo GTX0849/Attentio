@@ -15,6 +15,7 @@ The worker decides states with the rules in the `states:` section of `config/cla
 | `.streamlit/` | Streamlit theme (colours and IBM Plex fonts) |
 | `samples/` | `timetable.csv`, a sample weekly timetable, and `marks.csv`, a sample marks file for the simulated cohort, for the demo |
 | `simulator/` | Simulated classroom history: cohort, timetable and records generated and sent through the backend API (see Simulator) |
+| `config/tuned/` | Per-camera tuned limits and charts made by `python -m worker.autotune` (committed and shared; see Tuning the limits) |
 | `tests/` | pytest suite |
 | `config/classpulse.yaml` | The one shared config file (fps, window length, backend URL, refresh, the marks attention line, simulator sizes and effects) |
 
@@ -155,7 +156,7 @@ The white line under the message says what is wrong and what is needed, for exam
 - **Personal spread.** How much the head varies around the reference while Attentive: the 90th percentile (nearest rank) of the absolute effective angle, kept separately for pitch and yaw. It sets this student's extents: up extent = k x pitch spread, sideways extent = k x yaw spread, with k = 2.5, kept between 15 and 40 degrees (up) or 15 and 45 degrees (sideways). A fidgety student gets wider extents, a still one tighter. Until 30 s of Attentive data are in the window, nothing is learned: the reference stays at calibration and the extents are the camera's limits above (30 up, 35 sideways).
 - **Fixed downward rule, never learned.** Up to +15 degrees below the reference is Attentive; +15 to +38 is Neutral and uses the 8 s look-down allowance (refilled by 2 s of continuous Attentive); beyond +38 is Distracted. A phone held in the lap is never learned as "front", because only Attentive readings teach the reference.
 - **Limits.** A sudden, permanent jump of the head beyond the student's extents (a 20 degree change of posture in one move) is not learned, because those readings are not Attentive; only gradual shifts are followed. Recalibration (`reset_learning()`) clears the reference and extents.
-- **Storage.** The learned profile lives in memory (`worker/front_region.py`, behind the `FrontRegionProfile` interface) and is discarded at the end of the session. Nothing is written to disk. A persistent store may be added once consent and retention are designed.
+- **Storage.** The learned profile lives in memory (`worker/front_region.py`, behind the `FrontRegionProfile` interface) and is discarded at the end of the session. Nothing is written to disk, and it never changes a camera's tuned limits (only labelled tuning does, see "Tuning the limits"). A persistent store may be added once consent and retention are designed.
 
 Every number is in `states:` and `states.learning:` of `config/classpulse.yaml` (window, caps, k, minimum and maximum extents, data needed).
 
@@ -208,7 +209,39 @@ The preview shows a yellow "TUNE" chip under the state banner with the current l
 
 **What is saved.** Each run writes its own CSV file, `.spool/tuning/<camera id>/<UTC timestamp>.csv` (git-ignored; odd characters in the camera id become `_`). It has one row per scoring tick (about 10 a second), only while a face is locked and in view and calibration has finished, so there are no rows during calibration or when nobody is in view. The first line is `# classpulse tune v1 camera=<id>`, the second is the header, and the columns are `t` (epoch seconds), `label` (0 to 5), `pitch` and `yaw` (relative to calibration), `ref_pitch` and `ref_yaw` (the learned reference at that moment), `rel_pitch` and `rel_yaw` (pitch and yaw minus the reference), `eyes_closed` (0 or 1), `face_size_pct` and `state`. No names, student ids, images or other faces are saved, and the records sent to the backend are not changed. The full format is in the docstring of `worker/tuning.py`.
 
-The file is written in small buffered steps (flushed about once a second and on exit), so it never slows the preview. When you quit with `q` or Ctrl+C the worker prints the file path and the number of rows per label. Delete the files you no longer need.
+The file is written in small buffered steps (flushed about once a second and on exit), so it never slows the preview. When you quit with `q` or Ctrl+C the worker prints the file path and the number of rows per label, then tunes the camera from all its files (see "Tuning the limits" below). Delete or move the files of runs you do not want counted.
+
+### Tuning the limits
+
+As more people are recorded in tune mode, each camera's attention limits tune themselves from that evidence. Nothing else is needed: at the end of every `--tune` run the worker does it, and you can also run it by hand:
+
+```
+python -m worker.autotune CAM1              # tune camera CAM1 and write config/tuned/CAM1.yaml
+python -m worker.autotune CAM1 --dry-run    # show the suggested limits and write nothing
+```
+
+**What it reads.** All the tune files of that camera in `.spool/tuning/<camera id>/`, not just the latest run. To leave a run out, delete or move its file. A file that cannot be read (damaged, or another format version) is skipped with a warning. Rows labelled 0 are ignored. Each file counts as one run (one `--tune` session); the number of people is not recorded, so the summary reports runs, not people.
+
+**Minimum data.** Time is added up from the row timestamps, ignoring gaps over 2 s. At least 60 s of label 1 (watching the teacher), 30 s of label 2 (taking notes) and 30 s of label 3 (phone in lap) are needed. Below that nothing is changed and the summary says what is missing, for example "needs 22 s more of taking notes". The amounts are in the `tuning:` section of `config/classpulse.yaml`.
+
+**What is tuned.** Pitch and yaw are the angles relative to the learned reference (`rel_pitch`, `rel_yaw`), as the state rules use them.
+
+- **Up limit** (`pitch_attentive_min_deg`): the 95th percentile of how far up the head went while watching the teacher, plus a 3 degree margin, kept between 10 and 45 degrees. This is the up limit the adaptive front region starts from.
+- **Side limit** (`yaw_max_deg`): the 95th percentile of the sideways turn either way while watching the teacher, plus 3 degrees, kept between 10 and 50 degrees. The front region's sideways default.
+- **Notes/phone boundary** (`pitch_neutral_max_deg`): the pitch that best separates taking notes from phone in lap (the one with the best balanced accuracy, between the two groups' medians), kept between 20 and 60 degrees. If the two overlap so much that the balanced accuracy is under 70% (`tuning.min_separation`), the current value is kept and the summary says so.
+- Not tuned: `pitch_attentive_max_deg` (+15), the look-down allowance and refill, and the eyes-closed grace.
+
+**Reading the summary.** It prints the runs used, the minutes of each label, a table with the previous and new value of each limit, the percentiles behind the up and side limits, the notes/phone separation accuracy, and the paths of the file and chart. Previous means what the camera used before: its earlier tuned file, or the `states:` defaults.
+
+**Reading the chart.** `config/tuned/<camera id>.html` (open it in a browser) plots every labelled row: sideways turn on the x axis, pitch on the y axis (up is up), coloured by label. The dashed lines are the limits chosen: the up limit (top), the two side limits and the notes/phone boundary (below). The watching-the-teacher dots should sit inside the up and side lines, and the notes dots should sit above the boundary and the phone dots below it. Dots outside the lines, or notes and phone mixed together, mean more or cleaner labelled data is needed.
+
+**What is written.** `config/tuned/<camera id>.yaml` has the three values and, for people to read, when it was made, the runs, the minutes per label, the percentiles and the separation accuracy. Each new tune keeps the version it replaces in `config/tuned/history/<camera id>/` (the last 5 are kept). These files are meant to be committed and shared, so they are not git-ignored.
+
+**How the worker uses it.** At start-up the worker loads `config/tuned/<camera id>.yaml` for its `--camera` id if there is one. Its values replace the up limit, side limit and notes/phone boundary of the `states:` section for that camera only; nothing else changes, and other cameras keep the defaults. It prints which it is using, for example `Using tuned limits for CAM1 from config\tuned\CAM1.yaml (made 2026-11-20): up 28.0, side 31.0, notes/phone boundary 41.0 degrees.` or `Using the default limits for CAM1 (no tuned file): up 30.0, side 35.0, notes/phone boundary 38.0 degrees.`
+
+**Reverting.** Delete `config/tuned/<camera id>.yaml` to go back to the defaults. To undo one bad tune, copy the version you want from `config/tuned/history/<camera id>/` over `config/tuned/<camera id>.yaml`. To keep a run out of future tunes, delete or move its CSV. Then run `python -m worker.autotune <camera id>` again if you want a fresh tune.
+
+**Lecture learning never writes these files.** The reference and spread the worker learns during a lecture live in memory and are discarded; only labelled tuning (this section) changes a camera's limits.
 
 ## Timetable, lectures and sessions
 

@@ -32,7 +32,7 @@ from worker.detector import HaarReadingSource
 from worker.perception import Diagnostics, PerceptionSettings, PerceptionSource
 from worker.preview import draw_preview
 from worker.readings import ReadingSource
-from worker.states import StateThresholds
+from worker.states import StateThresholds, limits_message
 from worker.tracker import AttentionTracker
 from worker.tuning import (
     DEFAULT_TUNING_DIR,
@@ -97,7 +97,9 @@ def run(
     if key is None:
         log.warning(NO_KEY_MESSAGE)
     delivery = BackgroundDelivery(HttpSender(config.backend_url, service_key=key), Spool(spool_path))
-    tracker = AttentionTracker(camera, student, config.window_seconds, StateThresholds.from_config(config.raw))
+    thresholds = StateThresholds.from_config(config.raw, camera_id=camera)  # this camera's tuned limits, if any
+    print(limits_message(thresholds, camera), flush=True)
+    tracker = AttentionTracker(camera, student, config.window_seconds, thresholds)
     latest = LatestFrame()
     board = StatusBoard()
     stop = threading.Event()
@@ -146,7 +148,7 @@ def run(
             summary = recorder.close()
             print(format_summary(summary), flush=True)
             if summary.path is not None:
-                on_tune_finished(summary.path, summary.camera_id)  # CLA-21 hooks its analysis in here
+                on_tune_finished(summary.path, summary.camera_id)  # tunes the camera from all its tune files (worker/autotune.py)
         log.info("Stopped.")
     return 0
 

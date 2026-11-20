@@ -30,14 +30,25 @@ The classroom design keeps these decisions unchanged.
 
 ### 3.1 Attention states
 
-The worker assigns one of four states to each frame, at about 10 frames per second. The checks run in priority order: face, then eyes, then head direction. Pitch and yaw are measured relative to a 3-second calibration.
+The worker assigns one of four states to each frame, at about 10 frames per second. The checks run in priority order: face, then eyes, then head direction. Pitch and yaw are measured relative to a 3-second calibration, and then relative to a reference direction that moves with the student (below). Positive pitch means looking down.
 
-- **Attentive:** pitch from -10 to +15 degrees, yaw within 25 degrees.
-- **Neutral (note-taking):** pitch above +15 and up to +38 degrees, yaw within 25 degrees.
-- **Distracted:** anything beyond those bands.
+- **Attentive:** the head points toward the front of the room in any natural way. That is up to the up limit above the reference (30 degrees by default), up to 15 degrees below it, and within the side limit either way (35 degrees by default).
+- **Neutral (note-taking):** more than 15 and up to 38 degrees below the reference, within the side limit.
+- **Distracted:** anything beyond those bands, including looking further up or further sideways than the limits.
 - **Not visible:** the face and the shoulders are both lost.
 
 Three further rules apply. Eyes closed for 1.5 seconds or more count as Distracted from that point on. Looking down is Neutral for up to 8 seconds and then Distracted, and the allowance refills only after 2 seconds of continuous Attentive. If the face is lost but the shoulders are visible, the state is Distracted.
+
+**The front region is learned per student.** A fixed band would mark a student who slouches, leans or sits at the side as distracted. So the worker learns two things from each student's Attentive readings during the lecture:
+
+- **A moving reference.** The median pitch and yaw over the last 120 seconds, capped at 15 degrees of pitch and 20 degrees of yaw from calibration. Every limit is measured from it, so a slow change of posture is followed. A sudden, permanent jump is not learned, because those readings are not Attentive.
+- **A personal spread.** The 90th percentile of how far the head strays from the reference, separately for pitch and yaw. The up and side limits become 2.5 times the spread, kept between 15 and 40 degrees (up) and between 15 and 45 degrees (sideways). A fidgety student gets wider limits, and a still one tighter. Until 30 seconds of Attentive data exist, the camera's limits are used.
+
+**The downward limits are fixed.** The 15-degree Attentive limit, the 38-degree Neutral limit and the look-down allowance are never learned, so a phone held in the lap is never learned as "front".
+
+**Limits per camera.** The default 30-degree up limit and 35-degree side limit are also the starting point for the learned extents. A camera's limits can be tuned from labelled test sessions (`python -m worker.autotune <camera>`), which write a small file per camera in `config/tuned/`. The tuned up limit, side limit and note-taking/phone boundary then replace the defaults for that camera only. Only labelled tuning writes those files. What the worker learns during a lecture is kept in memory and discarded when the session ends.
+
+**Saving profiles between sessions needs a consent design first.** Keeping a student's learned movement profile from one lecture to the next would be personal data about a named person's behaviour, built from biometric readings. It must not be built until consent, retention and deletion have been designed under India's Digital Personal Data Protection Act (see section 8) and reviewed by the university's data protection officer. Until then the learned profile is never written to disk.
 
 ### 3.2 Records, scores and lectures
 
@@ -106,7 +117,7 @@ Students often look down together, for example to copy from the board. Judging e
 - **Class looks down together.** If 30% or more of the class looks down within 5 seconds, the Neutral allowance is boosted, because the class is probably doing a task the teacher set. The size of the boost is a parameter we have not yet chosen.
 - **One student looks down while the class is attentive.** If 85% of the class is attentive while one student looks down, that student's grace is shortened from 8 seconds to 3 seconds.
 
-Both rules change only the allowance in section 3.1, not the pitch and yaw bands. They need the camera to see most of the class, so they should switch off when too few faces are in view. The thresholds were chosen by reasoning, not from classroom data, so we should check them against recordings before relying on them.
+Both rules change only the allowance in section 3.1, not the pitch and yaw limits. They need the camera to see most of the class, so they should switch off when too few faces are in view. The thresholds were chosen by reasoning, not from classroom data, so we should check them against recordings before relying on them.
 
 ## 7. Logins and access
 
@@ -127,6 +138,7 @@ Face data is biometric personal data, so the Digital Personal Data Protection Ac
 - **Consent and enrolment.** No student is enrolled without a recorded consent. The consent text says what is collected, why, who can see it, how long it is kept and how to withdraw. We store the date and the version of the text the student saw.
 - **Data minimisation.** Frames are processed on the worker and discarded immediately. No video or image is written to disk or sent to the backend. Only face embeddings and aggregate scores are stored.
 - **Transparency.** Students can see their own data in the dashboard.
+- **Learned movement profiles.** The per-student reference and spread (section 3.1) live only in memory for the lecture. Saving them between sessions needs consent, retention and deletion rules designed first, and review by the data protection officer. Tune sessions (`--tune`) are for test sessions with people who have agreed to it, and save only head angles and labels, no names or images.
 - **Retention and deletion.** These are proposals for the university to confirm. Embeddings are kept while the student is enrolled and deleted on withdrawal of consent, on leaving the programme, or on re-enrolment. The 30-second records are kept for the semester and then deleted or reduced to lecture totals. A withdrawal request deletes the student's embeddings and records, and the deletion is logged without keeping the data. Backups follow the same schedule.
 
 ## 9. ERP timetable import
@@ -157,6 +169,6 @@ These are outside the first classroom version.
 
 **Camera.** A fixed camera at the front of the room, high enough to see faces over the heads in front. Placement decides which seats are visible and at what angle, so it should be chosen by testing in the actual room. A wide view helps coverage but reduces pixels per face, which hurts recognition at the back. Large rooms may need more than one camera, which we have not tested.
 
-**Calibration to the board.** In the prototype, the student looks at the screen for 3 seconds. In a classroom, "looking at the board" means a different head angle from each seat. Calibration will set the reference pitch and yaw from the board's position as seen from each seat region. The bands in section 3.1 stay the same, and only the reference changes.
+**Calibration to the board.** In the prototype, the student looks at the screen for 3 seconds. In a classroom, "looking at the board" means a different head angle from each seat. Calibration will set the reference pitch and yaw from the board's position as seen from each seat region. The limits in section 3.1 stay the same (or are tuned per camera), and only the reference changes.
 
 **The machine next to the camera.** The worker runs on a computer in the room and needs a GPU for InsightFace and the person detector. It sends only scores to the backend, so the network carries small records and no video. We have not yet measured which GPU can handle a full class at about 10 frames per second.

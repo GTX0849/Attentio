@@ -9,7 +9,7 @@ Labels (number keys in the preview window; 0 is the default at the start):
     0 nothing, 1 watching the teacher, 2 taking notes, 3 phone in lap,
     4 talking to a neighbour, 5 eyes closed
 
-File format, version 1 (read by the tuning analysis, CLA-21)
+File format, version 1 (read by the tuning analysis, worker/autotune.py)
 ------------------------------------------------------------
 Each run writes its own file: `.spool/tuning/<camera_id>/<UTC timestamp>.csv`, for example
 `.spool/tuning/CAM1/20261120T093015Z.csv` (`.spool/` is git-ignored; `camera_id` is made safe for a
@@ -46,7 +46,6 @@ recording off with one log line instead of stopping the worker.
 """
 
 import logging
-import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -56,6 +55,7 @@ from typing import IO
 
 from shared.config import PROJECT_ROOT
 from worker.concurrency import LabelHolder, Status
+from worker.tuned import safe_path_part
 
 log = logging.getLogger("worker.tuning")
 
@@ -112,15 +112,6 @@ def label_text(label: int) -> str:
     return f"{label} - {LABEL_NAMES.get(label, 'Unknown')}"
 
 
-_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
-
-
-def safe_path_part(camera_id: str) -> str:
-    """`camera_id` as one safe folder name: odd characters become `_`, no leading dots, never empty."""
-    cleaned = _UNSAFE.sub("_", camera_id).lstrip(".")
-    return cleaned or "camera"
-
-
 @dataclass(frozen=True)
 class TuneSummary:
     """What a finished tune run saved."""
@@ -144,9 +135,11 @@ def format_summary(summary: TuneSummary) -> str:
 def on_tune_finished(path: Path, camera_id: str) -> None:
     """The hook the runner calls once the tune file is closed (after the summary is printed).
 
-    CLA-21 puts the tuning analysis here (read `path`, see the format above). For now there is
-    nothing to do beyond the summary the runner has already printed.
+    Tunes the camera from ALL its tune files and prints the result (worker/autotune.py).
     """
+    from worker import autotune  # imported here: autotune reads this module's format constants
+
+    autotune.on_tune_finished(path, camera_id)
 
 
 class TuneRecorder:

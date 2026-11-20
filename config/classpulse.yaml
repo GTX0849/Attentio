@@ -45,6 +45,24 @@ states:
     min_side_extent_deg: 15      # how far to either side of the reference still counts as Attentive
     max_side_extent_deg: 45
 
+# Per-camera auto-tuning from labelled tune sessions (worker/limits.py, worker/autotune.py).
+# Only labelled tuning ever changes a camera's limits; lecture learning never writes these files.
+tuning:
+  min_watching_s: 60             # seconds of label 1 (watching the teacher) needed before anything is tuned
+  min_notes_s: 30                # seconds of label 2 (taking notes)
+  min_phone_s: 30                # seconds of label 3 (phone in lap)
+  max_gap_s: 2                   # a gap between two rows longer than this does not count as recorded time
+  percentile: 95                 # up and side limits = this percentile of the watching-the-teacher rows ...
+  margin_deg: 3                  # ... plus this margin
+  min_up_deg: 10                 # the up limit is kept between these (degrees above the reference)
+  max_up_deg: 45
+  min_side_deg: 10               # the side limit is kept between these (degrees either side of the reference)
+  max_side_deg: 50
+  min_neutral_max_deg: 20        # the notes/phone boundary is kept between these (degrees below the reference)
+  max_neutral_max_deg: 60
+  min_separation: 0.7            # notes vs phone balanced accuracy below this keeps the current boundary
+  history_keep: 5                # earlier versions of a camera's tuned file that are kept
+
 # Student and teacher figures (backend/metrics.py).
 scores:
   min_presence_ratio: 0.5        # presence below this over the period shown hides attention; a lecture counts as attended at or above it
