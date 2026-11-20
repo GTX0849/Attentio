@@ -5,7 +5,7 @@
 * Scoring thread: samples the newest frame at `worker.target_fps`, runs the reading
   source (MediaPipe) and the state rules, and publishes the current status.
 * Main thread: shows every new frame with the latest status drawn on it and handles
-  the q and recalibrate keys. OpenCV windows must live on the main thread.
+  the q, recalibrate and m (landmark overlay) keys. OpenCV windows must live on the main thread.
 * Delivery thread: sends finished windows in the background (see worker/concurrency.py),
   so a slow or unreachable backend never freezes the preview.
 
@@ -25,7 +25,7 @@ from worker.client import NO_KEY_MESSAGE, HttpSender
 from worker.concurrency import BackgroundDelivery, LatestFrame, Status, StatusBoard
 from worker.delivery import Spool
 from worker.detector import HaarReadingSource
-from worker.perception import PerceptionSettings, PerceptionSource
+from worker.perception import Diagnostics, PerceptionSettings, PerceptionSource
 from worker.preview import draw_preview
 from worker.readings import ReadingSource
 from worker.states import StateThresholds
@@ -35,6 +35,7 @@ log = logging.getLogger("worker")
 
 DEFAULT_SPOOL = PROJECT_ROOT / ".spool" / "unsent.jsonl"
 WINDOW_TITLE = "ClassPulse worker (q to quit)"
+LANDMARKS_KEY = "m"  # toggles the landmark overlay in the preview
 STALE_FRAME_S = 1.0  # a frame older than this counts as no frame (camera stalled or unplugged)
 
 
@@ -62,7 +63,7 @@ def run(
             return 1
         recalibrate_key = settings.recalibrate_key
         log.info(
-            "Calibrating for %.0f s: look at the screen. Press '%s' in the preview window to calibrate again.",
+            "Calibrating for %.0f s: look at the teacher. Press '%s' in the preview window to calibrate again.",
             settings.calibration_seconds,
             recalibrate_key,
         )
@@ -146,21 +147,37 @@ def _scoring_loop(
             if recalibrate.is_set() and isinstance(source, PerceptionSource):
                 recalibrate.clear()
                 source.recalibrate()
-                log.info("Recalibrating: look at the screen.")
+                tracker.reset_learning()  # the learned front region belongs to the old calibration
+                log.info("Recalibrating: look at the teacher.")
 
             now = time.time()
             got = latest.get()
             frame = got.frame if got is not None and now - got.timestamp <= STALE_FRAME_S else None
-            reading = source.read(frame, now)
+            diagnostics: Diagnostics | None = None
+            if isinstance(source, PerceptionSource):
+                reading, diagnostics = source.read_with_diagnostics(frame, now)
+            else:
+                reading = source.read(frame, now)
             delivery.submit(tracker.observe(reading))
             calibration_left = (
                 source.calibration_remaining(now)
                 if isinstance(source, PerceptionSource) and source.calibrating
                 else None
             )
-            board.set(Status(reading, tracker.current_state(now), tracker.look_down_remaining_s(now), calibration_left))
+            board.set(
+                Status(
+                    reading,
+                    tracker.current_state(now),
+                    tracker.look_down_remaining_s(now),
+                    calibration_left,
+                    diagnostics=diagnostics,
+                    reference=tracker.reference(),
+                    region=tracker.extents(),
+                )
+            )
             log.debug(
-                "reading face=%s shoulders=%s pitch=%+.1f yaw=%+.1f eyes_closed=%s state=%s",
+                "reading faces=%d face=%s shoulders=%s pitch=%+.1f yaw=%+.1f eyes_closed=%s state=%s",
+                diagnostics.face_count if diagnostics is not None else 0,
                 reading.face_present,
                 reading.shoulders_present,
                 reading.pitch_deg,
@@ -190,6 +207,7 @@ def _display_loop(
     recalibrate_key: str,
 ) -> None:
     shown_sequence = 0
+    show_landmarks = False  # toggled with m; always on while calibrating (see draw_preview)
     while not stop.is_set():
         got = latest.get()
         status = board.get()
@@ -197,10 +215,24 @@ def _display_loop(
             shown_sequence = got.sequence
             cv2.imshow(
                 WINDOW_TITLE,
-                draw_preview(got.frame, status.reading, status.state, status.look_down_left_s, status.calibration_left_s),
+                draw_preview(
+                    got.frame,
+                    status.reading,
+                    status.state,
+                    status.look_down_left_s,
+                    status.calibration_left_s,
+                    diagnostics=status.diagnostics,
+                    overlay=show_landmarks,
+                    reference=status.reference,
+                    region=status.region,
+                    recalibrate_key=recalibrate_key or None,
+                    landmarks_key=LANDMARKS_KEY,
+                ),
             )
         key = cv2.waitKey(5) & 0xFF  # also pumps the window's events
         if key == ord("q"):
             stop.set()
+        elif key == ord(LANDMARKS_KEY):
+            show_landmarks = not show_landmarks
         elif recalibrate_key and key == ord(recalibrate_key):
             recalibrate.set()

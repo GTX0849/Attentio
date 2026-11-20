@@ -9,7 +9,9 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
+from numpy.typing import NDArray
 
+from worker.face_tracker import Box, FaceTracker
 from worker.readings import Reading
 
 
@@ -41,19 +43,64 @@ def shoulders_from_visibility(visibility: tuple[float, float] | None, threshold:
     return visibility is not None and min(visibility) >= threshold
 
 
+# MediaPipe pose landmark indices (33-point body model).
+POSE_NOSE = 0
+POSE_HEAD = range(0, 11)  # nose, eyes, ears, mouth: the landmarks that say which head a pose belongs to
+POSE_LEFT_SHOULDER = 11
+POSE_RIGHT_SHOULDER = 12
+
+
+@dataclass(frozen=True)
+class FaceObservation:
+    """One face the model saw. Landmarks are normalised image coordinates (0 to 1, y down)."""
+
+    landmarks: NDArray[np.float64]  # shape (n, 2): x, y per landmark (478 with irises)
+    head_matrix: Any | None  # 4x4 facial transformation matrix; None = the model gave none
+    blendshapes: dict[str, float]  # blendshape name -> score
+
+    @property
+    def box(self) -> Box:
+        """The extent of the landmark points."""
+        xs, ys = self.landmarks[:, 0], self.landmarks[:, 1]
+        return Box(float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()))
+
+
+@dataclass(frozen=True)
+class PoseObservation:
+    """One body the model saw."""
+
+    landmarks: NDArray[np.float64]  # shape (33, 3): x, y (normalised, y down) and visibility per landmark
+
+    def visibility(self, index: int) -> float:
+        return float(self.landmarks[index, 2])
+
+    def point(self, index: int) -> tuple[float, float]:
+        return float(self.landmarks[index, 0]), float(self.landmarks[index, 1])
+
+
 @dataclass(frozen=True)
 class RawObservation:
-    """What the models saw in one frame, before any thresholds or calibration."""
+    """What the models saw in one frame, before any thresholds, tracking or calibration.
 
-    head_matrix: Any | None  # 4x4 facial transformation matrix; None = no face found
-    blendshapes: dict[str, float]  # blendshape name -> score (empty without a face)
-    shoulder_visibility: tuple[float, float] | None  # (left, right) pose visibility; None = no pose found
+    The order of faces and of poses carries no meaning, and the two lists are not linked:
+    matching a pose to a face is the source's job.
+    """
+
+    faces: tuple[FaceObservation, ...]
+    poses: tuple[PoseObservation, ...]
 
 
 class Backend(Protocol):
     """The thin adapter around the MediaPipe landmarkers."""
 
     def detect(self, frame: Any, timestamp: float) -> RawObservation: ...
+
+
+def _positive_int(value: Any, name: str) -> int:
+    n = int(value)
+    if n < 1:
+        raise ValueError(f"{name} must be at least 1")
+    return n
 
 
 @dataclass(frozen=True)
@@ -66,6 +113,9 @@ class PerceptionSettings:
     shoulder_visibility_threshold: float
     invert_pitch: bool
     invert_yaw: bool
+    max_faces: int = 5  # most faces and bodies the models look for in a frame
+    max_poses: int = 5
+    face_lost_after_s: float = 1.0  # the scored face missing longer than this counts as no face
 
     @classmethod
     def from_config(cls, raw: dict[str, Any]) -> "PerceptionSettings":
@@ -83,10 +133,57 @@ class PerceptionSettings:
             shoulder_visibility_threshold=float(s["shoulder_visibility_threshold"]),
             invert_pitch=bool(s["invert_pitch"]),
             invert_yaw=bool(s["invert_yaw"]),
+            max_faces=_positive_int(s["max_faces"], "perception.max_faces"),
+            max_poses=_positive_int(s["max_poses"], "perception.max_poses"),
+            face_lost_after_s=float(s["face_lost_after_s"]),
         )
 
 
+@dataclass(frozen=True)
+class FaceDiagnostic:
+    """One face in view this frame, for the preview only. Never scored, stored or sent."""
+
+    track_id: int
+    box: Box
+    landmarks: NDArray[np.float64]
+    tracked: bool  # True for the scored person, False for everyone else ("ignored")
+    pitch_deg: float | None  # raw head angles, relative to the camera, + = down / + = image right
+    yaw_deg: float | None  # (what the head really does; not calibrated, not inverted). None without a matrix
+
+
+@dataclass(frozen=True)
+class FramingReadout:
+    """How well the scored person is framed. Filled in by CLA-19; None until then."""
+
+    in_frame_pct: float
+    size_pct: float
+    steady_deg: float
+
+
+@dataclass(frozen=True)
+class Diagnostics:
+    """What the preview needs beyond the Reading. Lives for one frame; nothing here is stored."""
+
+    faces: tuple[FaceDiagnostic, ...] = ()
+    shoulders: tuple[tuple[float, float], tuple[float, float]] | None = None  # locked pose's (left, right) points
+    framing: FramingReadout | None = None  # CLA-19: the "In frame / Size / Steady" readout line
+    calibration_reason: str | None = None  # CLA-19: why calibration is waiting; None shows "Calibrating"
+
+    @property
+    def face_count(self) -> int:
+        return len(self.faces)
+
+    @property
+    def tracked_count(self) -> int:
+        return sum(1 for f in self.faces if f.tracked)
+
+    @property
+    def tracked(self) -> FaceDiagnostic | None:
+        return next((f for f in self.faces if f.tracked), None)
+
+
 MIN_CALIBRATION_SAMPLES = 5  # face frames needed before a calibration may finish
+SWITCH_AREA_FACTOR = 1.5  # during calibration a face this much larger than the locked one takes the lock
 
 
 @dataclass
@@ -96,16 +193,39 @@ class _Calibration:
     yaws: list[float] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _FaceReading:
+    """The last angles read from the scored face, held through short dropouts."""
+
+    pitch_deg: float  # relative to calibration
+    yaw_deg: float
+    eyes_closed: bool
+
+
 class PerceptionSource:
     """A ReadingSource that turns a Backend's raw observations into Readings.
 
+    Who is scored: the backend may see several faces. A `FaceTracker` follows each one
+    frame to frame, and at calibration the source locks onto the largest face. Only that
+    face is scored. If it is missing for more than `face_lost_after_s` the readings
+    become face-absent, and the source never moves on to another face by itself: it locks
+    again on `recalibrate()`, or when a face shows up where the locked one was last seen.
+    The other faces are not scored, stored or sent; they only appear in the diagnostics.
+    Shoulders come only from the body whose head sits inside the locked face's box (its
+    last known box when the face is missing), so someone behind does not count.
+
     Calibration: for `calibration_seconds` from the first frame (and again after
-    `recalibrate()`), the person is assumed to be looking at the screen. Every
-    frame with a face adds its raw pitch and yaw to the sample; when the time is
+    `recalibrate()`), the person is assumed to be looking at the teacher. Every
+    frame with the locked face adds its raw pitch and yaw to the sample; when the time is
     up (and at least a few face frames were seen) the means become the zero. While
     calibrating, readings carry pitch 0 and yaw 0, so the person counts as looking
-    at the screen, and the state rules receive them as usual. If nobody is in view,
-    calibration simply keeps waiting for a face.
+    at the teacher, and the state rules receive them as usual. If nobody is in view,
+    calibration simply keeps waiting for a face. If the face it locked onto is lost for
+    longer than `face_lost_after_s` before calibration has finished, the lock and the
+    samples so far are dropped and it locks onto the largest face again. The same happens
+    if, during calibration, a face more than 1.5 times the area of the locked one appears
+    (the person nearest the camera is usually the one who was not detected in the first frame).
+    After calibration the lock is never moved by size.
     """
 
     def __init__(self, backend: Backend, settings: PerceptionSettings) -> None:
@@ -113,14 +233,24 @@ class PerceptionSource:
         self._settings = settings
         self._calibration: _Calibration | None = _Calibration()
         self._offset = (0.0, 0.0)  # raw (pitch, yaw) that counts as zero
+        self._faces = FaceTracker(settings.face_lost_after_s)
+        self._held: _FaceReading | None = None  # last reading of the locked face
+        self._diagnostics = Diagnostics()
 
     @property
     def calibrating(self) -> bool:
         return self._calibration is not None
 
+    @property
+    def diagnostics(self) -> Diagnostics:
+        """The diagnostics of the most recent `read`."""
+        return self._diagnostics
+
     def recalibrate(self) -> None:
-        """Start calibrating again from the next frame."""
+        """Start calibrating again from the next frame, and lock onto the largest face then."""
         self._calibration = _Calibration()
+        self._faces.unlock()
+        self._held = None
 
     def calibration_remaining(self, timestamp: float) -> float:
         """Seconds of calibration left at `timestamp` (0 when not calibrating)."""
@@ -132,32 +262,129 @@ class PerceptionSource:
         return max(0.0, self._settings.calibration_seconds - (timestamp - c.started_at))
 
     def read(self, frame: Any | None, timestamp: float) -> Reading:
+        return self.read_with_diagnostics(frame, timestamp)[0]
+
+    def read_with_diagnostics(self, frame: Any | None, timestamp: float) -> tuple[Reading, Diagnostics]:
+        """The scored person's Reading, plus what the preview needs to draw."""
         if frame is None:
-            return Reading(timestamp=timestamp, face_present=False, shoulders_present=False)
+            self._diagnostics = Diagnostics()
+            return Reading(timestamp=timestamp, face_present=False, shoulders_present=False), self._diagnostics
         obs = self._backend.detect(frame, timestamp)
         st = self._settings
-        shoulders = shoulders_from_visibility(obs.shoulder_visibility, st.shoulder_visibility_threshold)
-        if obs.head_matrix is None:
-            self._advance_calibration(timestamp, None)
-            return Reading(timestamp=timestamp, face_present=False, shoulders_present=shoulders)
-        pitch, yaw = head_angles_from_matrix(obs.head_matrix)
-        if st.invert_pitch:
-            pitch = -pitch
-        if st.invert_yaw:
-            yaw = -yaw
-        self._advance_calibration(timestamp, (pitch, yaw))
+
+        ids = self._faces.update([f.box for f in obs.faces], timestamp)
+        if self._calibration is not None:
+            if self._faces.locked_lost(timestamp):  # the person we locked onto left: start over
+                self._faces.unlock()
+                self._calibration = _Calibration()
+                self._held = None
+            elif self._faces.has_clearly_larger_face(SWITCH_AREA_FACTOR):
+                # the locked face was a far-away or partial one and the real person has now been found
+                self._faces.unlock()
+                self._calibration = _Calibration()
+                self._held = None
+            if self._faces.locked_id is None:
+                self._faces.lock_largest()
+        locked_index = self._faces.locked_index
+
+        locked_face = obs.faces[locked_index] if locked_index is not None else None
+        angles = self._angles(locked_face)
+        shoulders, shoulder_points = self._shoulders(obs.poses)
+        faces: list[FaceDiagnostic] = []
+        for i, face in enumerate(obs.faces):
+            raw = self._raw_angles(face)
+            faces.append(
+                FaceDiagnostic(
+                    track_id=ids[i],
+                    box=face.box,
+                    landmarks=face.landmarks,
+                    tracked=i == locked_index,
+                    pitch_deg=raw[0] if raw else None,
+                    yaw_deg=raw[1] if raw else None,
+                )
+            )
+        self._diagnostics = Diagnostics(faces=tuple(faces), shoulders=shoulder_points)
+
+        self._advance_calibration(timestamp, angles)
+        if angles is None:
+            held = self._held
+            if held is not None and not self._faces.locked_lost(timestamp):
+                # a short dropout: keep the last reading of this person rather than flicker
+                return (
+                    Reading(
+                        timestamp=timestamp,
+                        face_present=True,
+                        shoulders_present=shoulders,
+                        pitch_deg=held.pitch_deg,
+                        yaw_deg=held.yaw_deg,
+                        eyes_closed=held.eyes_closed,
+                    ),
+                    self._diagnostics,
+                )
+            return (
+                Reading(timestamp=timestamp, face_present=False, shoulders_present=shoulders),
+                self._diagnostics,
+            )
+        assert locked_face is not None
         if self._calibration is not None:
             rel_pitch = rel_yaw = 0.0
         else:
-            rel_pitch, rel_yaw = pitch - self._offset[0], yaw - self._offset[1]
-        return Reading(
-            timestamp=timestamp,
-            face_present=True,
-            shoulders_present=shoulders,
-            pitch_deg=rel_pitch,
-            yaw_deg=rel_yaw,
-            eyes_closed=eyes_closed_from_blendshapes(obs.blendshapes, st.blink_threshold),
+            rel_pitch, rel_yaw = angles[0] - self._offset[0], angles[1] - self._offset[1]
+        eyes_closed = eyes_closed_from_blendshapes(locked_face.blendshapes, st.blink_threshold)
+        self._held = _FaceReading(rel_pitch, rel_yaw, eyes_closed)
+        return (
+            Reading(
+                timestamp=timestamp,
+                face_present=True,
+                shoulders_present=shoulders,
+                pitch_deg=rel_pitch,
+                yaw_deg=rel_yaw,
+                eyes_closed=eyes_closed,
+            ),
+            self._diagnostics,
         )
+
+    @staticmethod
+    def _raw_angles(face: FaceObservation) -> tuple[float, float] | None:
+        return None if face.head_matrix is None else head_angles_from_matrix(face.head_matrix)
+
+    def _angles(self, face: FaceObservation | None) -> tuple[float, float] | None:
+        """The locked face's (pitch, yaw) with the invert flags applied; None without a usable face."""
+        raw = self._raw_angles(face) if face is not None else None
+        if raw is None:
+            return None
+        pitch, yaw = raw
+        return (-pitch if self._settings.invert_pitch else pitch, -yaw if self._settings.invert_yaw else yaw)
+
+    def _shoulders(
+        self, poses: tuple[PoseObservation, ...]
+    ) -> tuple[bool, tuple[tuple[float, float], tuple[float, float]] | None]:
+        """Whether both shoulders of the locked person are visible, and their points if so.
+
+        The locked person's body is the pose whose head landmarks lie inside the locked face's
+        box (last known box if the face is out of view); with several, the nose nearest the
+        box centre. No locked face, no pose in the box: no shoulders.
+        """
+        box = self._faces.locked_box
+        if box is None:
+            return False, None
+        cx, cy = box.centre
+        best: PoseObservation | None = None
+        best_key: tuple[int, float] | None = None
+        for pose in poses:
+            if not any(box.contains(*pose.point(i)) for i in POSE_HEAD):
+                continue
+            nx, ny = pose.point(POSE_NOSE)
+            key = (0 if box.contains(nx, ny) else 1, (nx - cx) ** 2 + (ny - cy) ** 2)
+            if best_key is None or key < best_key:
+                best, best_key = pose, key
+        if best is None:
+            return False, None
+        left = best.visibility(POSE_LEFT_SHOULDER)
+        right = best.visibility(POSE_RIGHT_SHOULDER)
+        present = shoulders_from_visibility((left, right), self._settings.shoulder_visibility_threshold)
+        points = (best.point(POSE_LEFT_SHOULDER), best.point(POSE_RIGHT_SHOULDER)) if present else None
+        return present, points
 
     def _advance_calibration(self, timestamp: float, angles: tuple[float, float] | None) -> None:
         c = self._calibration

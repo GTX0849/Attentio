@@ -127,10 +127,10 @@ This fetches only the official MediaPipe `face_landmarker` and `pose_landmarker_
 
 - Head pitch and yaw come from the rotation part of the transformation matrix (the direction the face points).
 - Eyes closed means both `eyeBlinkLeft` and `eyeBlinkRight` are at or above `perception.blink_threshold`. The raw value goes to the rules, which apply the 1.5 s grace.
-- Shoulders come from PoseLandmarker (lite): both shoulder landmarks need a visibility at or above `perception.shoulder_visibility_threshold`.
+- Shoulders come from PoseLandmarker (lite): both shoulder landmarks of the scored person's body need a visibility at or above `perception.shoulder_visibility_threshold` (see "Several people in view" for which body that is).
 - Both models run in VIDEO mode on the unmirrored camera frame. Only the preview is mirrored.
 
-**Calibration.** At launch, look at the screen for `perception.calibration_seconds` (3 s). The mean raw pitch and yaw over that time (face frames only) become the zero, and every later reading is relative to it. While calibrating, readings still go to the state rules but carry pitch 0 and yaw 0 (looking at the screen), so the first seconds count as Attentive. If nobody is in view, calibration waits for a face. Press the key in `perception.recalibrate_key` (`c`) in the preview window to calibrate again at any time. There is no key with `--no-preview`.
+**Calibration.** At launch, look at the teacher for `perception.calibration_seconds` (3 s). The mean raw pitch and yaw over that time (face frames only) become the zero, and every later reading is relative to it. While calibrating, readings still go to the state rules but carry pitch 0 and yaw 0 (looking at the teacher), so the first seconds count as Attentive. If nobody is in view, calibration waits for a face. Press the key in `perception.recalibrate_key` (`c`) in the preview window to calibrate again at any time. There is no key with `--no-preview`.
 
 **The front region (state rules).** A student counts as Attentive while facing the front of the room in any natural way: looking up at a standing teacher, turning toward one who walks across the room, slouching, leaning, sitting up. Out of the box (the `states:` section of `config/classpulse.yaml`) Attentive runs from 30 degrees up (pitch -30) to 15 degrees down (pitch +15), and up to 35 degrees to either side (|yaw| at most 35). Looking further up or further sideways is Distracted, as is a long look down, turning well to the side or back, and closed eyes. These angles are measured from a *reference direction*, not from calibration alone:
 
@@ -144,9 +144,18 @@ Every number is in `states:` and `states.learning:` of `config/classpulse.yaml` 
 
 **Sign flags.** Positive pitch must mean looking down, and the preview shows the value live. The signs were derived from the matrix maths and the live check showed sensible magnitudes, but a human pose could not be judged. If looking down shows a negative pitch, set `perception.invert_pitch: true` in `config/classpulse.yaml`. `invert_yaw` flips yaw; only its absolute value is used by the rules, so it is mostly cosmetic.
 
-**Preview window.** The mirrored video with a banner in the dashboard state colour (Attentive `#1B5FD0`, Neutral `#9DB3D6`, Distracted `#D4622A`, Not visible `#C9CDD2`), relative pitch and yaw, eyes open or closed, the look-down allowance left, and a "Calibrating..." overlay. `q` quits and flushes the partial window.
+**Several people in view.** The models look for up to `perception.max_faces` faces and `perception.max_poses` bodies per frame (both default 5; they are maximums, and each extra person costs processing time, so lower them on a slow machine). Only one person is scored, and the choice is made like this:
 
-**Demo script (act it out, about two minutes).** Start the worker, look at the screen through the 3 s calibration, then:
+- **At calibration the worker locks onto the largest face** (the person nearest the camera) and follows it from frame to frame by box overlap. If a clearly larger face (1.5 times the area) shows up before calibration has finished, the lock moves to it and the calibration timer restarts. After calibration the lock never moves because of size.
+- **It never switches to another face by itself.** If the locked face is missing for longer than `perception.face_lost_after_s` (1 s) the readings become face-absent under the usual rules (shorter dropouts keep the last reading). The lock is taken again when you press `c`, or when a face reappears where the locked one was last seen.
+- **Shoulders come only from the body whose head lies inside the locked face's box**, so someone behind who has both shoulders in view does not count. With no locked face, shoulders count as not in view.
+- Other faces are never scored, stored or sent. They only appear in the preview as "Ignored", and `--debug` logs just how many faces were seen.
+
+**Preview window.** The mirrored video with a banner across the top (the dashboard state colour: Attentive `#1B5FD0`, Neutral `#9DB3D6`, Distracted `#D4622A`, Not visible `#C9CDD2`; yellow `#FFD34D` while calibrating) showing the state on the left and "Faces 3 - tracking 1" on the right; a readout panel at bottom-left (relative pitch and yaw, eyes open or closed, the learned reference and front region, the look-down allowance left, and "No face" with the shoulder state when the face is lost); a key hints bar along the bottom; and, while calibrating, a message panel saying "Look at the teacher and hold still" with the seconds left. Keys: `q` quits and flushes the partial window, `c` recalibrates (and clears the learned front region), `m` shows or hides the landmark overlay.
+
+The **landmark overlay** is on by itself while calibrating and otherwise toggled with `m`. It draws a 2 px box and a "Tracked" tag on the scored face, in the state colour (yellow while calibrating); a grey box and an "Ignored" tag on every other face; on the tracked face only, contours for the face oval, eyebrows, eyes and lips, small dots for the irises, white dots with a coloured ring at the nose tip, chin, outer eye corners and mouth corners, an arrow from the nose tip (about 90 px) pointing where the head points, and both shoulder points joined by a line. Each line has a thin dark outline so it stays readable on real video. The face-mesh indices are in `worker/face_mesh.py`: nose tip 1, chin 152, eye outer corners 33 and 263, mouth corners 61 and 291, iris centres 468 and 473.
+
+**Demo script (act it out, about two minutes).** Start the worker, look at the teacher through the 3 s calibration, then:
 
 | Do this | Expect |
 | --- | --- |

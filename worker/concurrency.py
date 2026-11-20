@@ -19,6 +19,7 @@ from typing import Any
 
 from shared.schema import AttentionRecord, AttentionState
 from worker.delivery import Delivery, Sender, Spool
+from worker.perception import Diagnostics
 from worker.readings import Reading
 
 log = logging.getLogger("worker.concurrency")
@@ -57,6 +58,9 @@ class Status:
     state: AttentionState | None
     look_down_left_s: float
     calibration_left_s: float | None
+    diagnostics: Diagnostics | None = None  # faces and shoulders for the overlay; None without MediaPipe
+    reference: tuple[float, float] | None = None  # learned front-region centre (pitch, yaw), degrees
+    region: tuple[float, float] | None = None  # front-region extents (up, sideways), degrees
 
 
 class StatusBoard:

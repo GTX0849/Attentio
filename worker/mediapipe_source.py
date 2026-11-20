@@ -9,13 +9,17 @@ from typing import Any
 
 import cv2
 import mediapipe as mp
+import numpy as np
 from mediapipe.tasks.python import BaseOptions, vision
 
 from shared.config import PROJECT_ROOT
-from worker.perception import PerceptionSettings, PerceptionSource, RawObservation
-
-LEFT_SHOULDER = 11
-RIGHT_SHOULDER = 12
+from worker.perception import (
+    FaceObservation,
+    PerceptionSettings,
+    PerceptionSource,
+    PoseObservation,
+    RawObservation,
+)
 
 
 def resolve_model(path: str) -> Path:
@@ -24,8 +28,18 @@ def resolve_model(path: str) -> Path:
     return p if p.is_absolute() else PROJECT_ROOT / p
 
 
+def _score(value: float | None) -> float:
+    """A landmark's visibility; MediaPipe leaves it None when the model gives none."""
+    return 0.0 if value is None else float(value)
+
+
 class MediaPipeBackend:
-    def __init__(self, face_model: Path, pose_model: Path) -> None:
+    """Runs both landmarkers for up to `max_faces` faces and `max_poses` bodies per frame.
+
+    Both numbers are maximums: the models return only who they find, in no particular order.
+    """
+
+    def __init__(self, face_model: Path, pose_model: Path, max_faces: int = 1, max_poses: int = 1) -> None:
         for model in (face_model, pose_model):
             if not model.exists():
                 raise FileNotFoundError(
@@ -36,7 +50,7 @@ class MediaPipeBackend:
             vision.FaceLandmarkerOptions(
                 base_options=BaseOptions(model_asset_path=str(face_model)),
                 running_mode=mode,
-                num_faces=1,
+                num_faces=max_faces,
                 output_face_blendshapes=True,
                 output_facial_transformation_matrixes=True,
             )
@@ -45,7 +59,7 @@ class MediaPipeBackend:
             vision.PoseLandmarkerOptions(
                 base_options=BaseOptions(model_asset_path=str(pose_model)),
                 running_mode=mode,
-                num_poses=1,
+                num_poses=max_poses,
             )
         )
         self._last_ms = -1
@@ -60,17 +74,24 @@ class MediaPipeBackend:
         face = self._face.detect_for_video(image, ms)
         pose = self._pose.detect_for_video(image, ms)
 
-        matrix = None
-        blendshapes: dict[str, float] = {}
-        if face.face_landmarks and face.facial_transformation_matrixes:
-            matrix = face.facial_transformation_matrixes[0]
-            if face.face_blendshapes:
-                blendshapes = {c.category_name: float(c.score) for c in face.face_blendshapes[0]}
-        shoulders: tuple[float, float] | None = None
-        if pose.pose_landmarks:
-            lm = pose.pose_landmarks[0]
-            shoulders = (float(lm[LEFT_SHOULDER].visibility), float(lm[RIGHT_SHOULDER].visibility))
-        return RawObservation(head_matrix=matrix, blendshapes=blendshapes, shoulder_visibility=shoulders)
+        faces: list[FaceObservation] = []
+        for i, landmarks in enumerate(face.face_landmarks):
+            if not landmarks:
+                continue
+            matrix = face.facial_transformation_matrixes[i] if i < len(face.facial_transformation_matrixes) else None
+            blendshapes: dict[str, float] = {}
+            if i < len(face.face_blendshapes):
+                blendshapes = {c.category_name: float(c.score) for c in face.face_blendshapes[i]}
+            points = np.array([(lm.x, lm.y) for lm in landmarks], dtype=np.float64)
+            faces.append(FaceObservation(landmarks=points, head_matrix=matrix, blendshapes=blendshapes))
+        poses = tuple(
+            PoseObservation(
+                landmarks=np.array([(lm.x, lm.y, _score(lm.visibility)) for lm in landmarks], dtype=np.float64)
+            )
+            for landmarks in pose.pose_landmarks
+            if landmarks
+        )
+        return RawObservation(faces=tuple(faces), poses=poses)
 
     def close(self) -> None:
         self._face.close()
@@ -81,7 +102,12 @@ class MediaPipeReadingSource(PerceptionSource):
     """The default ReadingSource: real head pose, eyes, shoulders and calibration."""
 
     def __init__(self, settings: PerceptionSettings) -> None:
-        self._mp_backend = MediaPipeBackend(resolve_model(settings.face_model), resolve_model(settings.pose_model))
+        self._mp_backend = MediaPipeBackend(
+            resolve_model(settings.face_model),
+            resolve_model(settings.pose_model),
+            max_faces=settings.max_faces,
+            max_poses=settings.max_poses,
+        )
         super().__init__(self._mp_backend, settings)
 
     def close(self) -> None:

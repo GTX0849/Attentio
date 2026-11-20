@@ -11,9 +11,13 @@ import pytest
 
 from typing import Any
 
+from numpy.typing import NDArray
+
 from worker.perception import (
+    FaceObservation,
     PerceptionSettings,
     PerceptionSource,
+    PoseObservation,
     RawObservation,
     eyes_closed_from_blendshapes,
     head_angles_from_matrix,
@@ -105,11 +109,41 @@ SETTINGS = PerceptionSettings(
 )
 
 
+def face_obs(
+    cx: float = 0.5,
+    cy: float = 0.5,
+    size: float = 0.2,
+    pitch: float = 0.0,
+    yaw: float = 0.0,
+    blink: float = 0.0,
+) -> FaceObservation:
+    """A made-up face whose landmark extent is a square of side `size` centred on (cx, cy)."""
+    h = size / 2
+    points = np.array([[cx - h, cy - h], [cx + h, cy + h], [cx, cy]])
+    return FaceObservation(
+        landmarks=points,
+        head_matrix=rotation_matrix(pitch, yaw),
+        blendshapes={"eyeBlinkLeft": blink, "eyeBlinkRight": blink},
+    )
+
+
+def pose_obs(
+    nose: tuple[float, float] = (0.5, 0.5),
+    shoulders: tuple[float, float] = (0.9, 0.9),
+) -> PoseObservation:
+    """A made-up body: nose at `nose`, shoulders 0.2 below it with the given visibilities."""
+    lm: NDArray[np.float64] = np.zeros((33, 3))
+    lm[:, 0], lm[:, 1] = nose
+    lm[11] = (nose[0] - 0.15, nose[1] + 0.2, shoulders[0])
+    lm[12] = (nose[0] + 0.15, nose[1] + 0.2, shoulders[1])
+    return PoseObservation(landmarks=lm)
+
+
 class FakeBackend:
     """Returns whatever observation was queued last; records how often it was asked."""
 
     def __init__(self) -> None:
-        self.next = RawObservation(head_matrix=None, blendshapes={}, shoulder_visibility=None)
+        self.next = RawObservation(faces=(), poses=())
         self.calls = 0
 
     def face(
@@ -119,11 +153,12 @@ class FakeBackend:
         blink: float = 0.0,
         shoulders: tuple[float, float] | None = (0.9, 0.9),
     ) -> None:
-        self.next = RawObservation(
-            head_matrix=rotation_matrix(pitch, yaw),
-            blendshapes={"eyeBlinkLeft": blink, "eyeBlinkRight": blink},
-            shoulder_visibility=shoulders,
-        )
+        """One person, centred: a face, plus a body behind it unless `shoulders` is None."""
+        poses = () if shoulders is None else (pose_obs(shoulders=shoulders),)
+        self.next = RawObservation(faces=(face_obs(pitch=pitch, yaw=yaw, blink=blink),), poses=poses)
+
+    def scene(self, faces: list[FaceObservation], poses: list[PoseObservation] | None = None) -> None:
+        self.next = RawObservation(faces=tuple(faces), poses=tuple(poses or ()))
 
     def detect(self, frame: Any, timestamp: float) -> RawObservation:
         self.calls += 1
@@ -226,11 +261,11 @@ def test_eyes_closed_and_shoulders_come_through_from_the_raw_observation() -> No
 def test_no_face_keeps_the_shoulders_so_distracted_can_be_told_from_not_visible() -> None:
     backend = FakeBackend()
     source = calibrated_source(backend)
-    backend.next = RawObservation(head_matrix=None, blendshapes={}, shoulder_visibility=(0.9, 0.9))
-    r = source.read(FRAME, 110.0)
+    backend.scene([], [pose_obs(shoulders=(0.9, 0.9))])  # face turned away, body still there
+    r = source.read(FRAME, 112.0)  # long enough for the face to count as lost
     assert (r.face_present, r.shoulders_present) == (False, True)
-    backend.next = RawObservation(head_matrix=None, blendshapes={}, shoulder_visibility=None)
-    r = source.read(FRAME, 110.1)
+    backend.scene([], [])
+    r = source.read(FRAME, 112.1)
     assert (r.face_present, r.shoulders_present) == (False, False)
 
 
