@@ -2,15 +2,22 @@
 
 from shared.schema import AttentionRecord, AttentionState
 from worker.readings import Reading
+from worker.front_region import FrontRegionProfile
 from worker.states import StateClassifier, StateThresholds
 from worker.windows import WindowAggregator
 
 
 class AttentionTracker:
     def __init__(
-        self, camera_id: str, student_id: str, window_seconds: int, thresholds: StateThresholds
+        self,
+        camera_id: str,
+        student_id: str,
+        window_seconds: int,
+        thresholds: StateThresholds,
+        profile: FrontRegionProfile | None = None,
     ) -> None:
-        self._classifier = StateClassifier(thresholds)
+        """`profile` keeps what is learned about this student; in memory (session only) unless given."""
+        self._classifier = StateClassifier(thresholds, profile)
         self._aggregator = WindowAggregator(camera_id, student_id, window_seconds)
 
     def observe(self, reading: Reading) -> list[AttentionRecord]:
@@ -29,6 +36,18 @@ class AttentionTracker:
     def look_down_remaining_s(self, at: float) -> float:
         """Look-down allowance left at `at`, for the preview (read-only)."""
         return self._classifier.look_down_remaining_s(at)
+
+    def reset_learning(self) -> None:
+        """Clear the learned front region. The runner calls this when the student recalibrates."""
+        self._classifier.reset_learning()
+
+    def reference(self) -> tuple[float, float]:
+        """The learned reference direction (pitch, yaw) in degrees from calibration, for the preview (read-only)."""
+        return self._classifier.reference()
+
+    def extents(self) -> tuple[float, float]:
+        """The current (up, sideways) limits in degrees from the reference, for the preview (read-only)."""
+        return self._classifier.extents()
 
     def _feed(self, transitions: list[tuple[float, AttentionState]]) -> list[AttentionRecord]:
         records: list[AttentionRecord] = []

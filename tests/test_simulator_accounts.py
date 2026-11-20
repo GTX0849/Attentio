@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.models import Account
+from simulator import client as simulator_client
 from simulator.client import Backend, SimulatorError, seed, wipe
 from simulator.config import load_simulator_config
 from simulator.credentials import credentials_text, write_credentials
@@ -60,7 +61,8 @@ def test_the_wipe_removes_the_simulated_accounts_but_not_live_ones(
 def test_a_new_password_is_made_for_each_run_unless_one_is_set(
     client: TestClient, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("CLASSPULSE_DEMO_PASSWORD", raising=False)
+    # Patch the lookup itself: the real .env (re-read on every call) may set CLASSPULSE_DEMO_PASSWORD.
+    monkeypatch.setattr(simulator_client, "configured_demo_password", lambda: None)
     clock.set(NOW)
     config = replace(load_simulator_config(small=True), weeks=1, records_per_request=1000)
     first = seed(Backend(client), config, now=NOW)
@@ -68,7 +70,7 @@ def test_a_new_password_is_made_for_each_run_unless_one_is_set(
     assert first.password_generated and second.password_generated
     assert first.demo_password != second.demo_password and len(first.demo_password) >= 12
 
-    monkeypatch.setenv("CLASSPULSE_DEMO_PASSWORD", "chosen-by-the-person")
+    monkeypatch.setattr(simulator_client, "configured_demo_password", lambda: "chosen-by-the-person")
     third = seed(Backend(client), config, now=NOW)
     assert third.demo_password == "chosen-by-the-person" and not third.password_generated
 

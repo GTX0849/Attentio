@@ -11,6 +11,7 @@ import pytest
 from shared.config import load_config
 from shared.schema import AttentionRecord, AttentionState
 from worker.readings import Reading
+from worker.front_region import LearningConfig
 from worker.states import StateThresholds
 from worker.tracker import AttentionTracker
 
@@ -50,13 +51,28 @@ def only(state: str, total: float) -> dict[str, float]:
 
 def test_the_thresholds_come_from_the_yaml_config() -> None:
     assert THRESHOLDS == StateThresholds(
-        pitch_attentive_min_deg=-10,
+        pitch_attentive_min_deg=-30,
         pitch_attentive_max_deg=15,
         pitch_neutral_max_deg=38,
-        yaw_max_deg=25,
+        yaw_max_deg=35,
         eyes_closed_grace_s=1.5,
         look_down_allowance_s=8,
         allowance_refill_s=2,
+        learning=LearningConfig(
+            window_s=120,
+            max_samples=2400,
+            max_gap_s=2,
+            update_interval_s=1,
+            min_attentive_s=30,
+            max_reference_pitch_deg=15,
+            max_reference_yaw_deg=20,
+            spread_percentile=90,
+            spread_multiplier=2.5,
+            min_up_extent_deg=15,
+            max_up_extent_deg=40,
+            min_side_extent_deg=15,
+            max_side_extent_deg=45,
+        ),
     )
 
 
@@ -85,18 +101,21 @@ def test_face_and_shoulders_lost_is_not_visible() -> None:
 @pytest.mark.parametrize(
     ("pitch", "yaw", "expected"),
     [
-        (-10, 0, "attentive"),  # lower pitch edge, inclusive
-        (-10.5, 0, "distracted"),
+        (-30, 0, "attentive"),  # lower pitch edge (looking up), inclusive
+        (-30.5, 0, "distracted"),
+        (-25, 0, "attentive"),  # a student looking up at a standing teacher
+        (-35, 0, "distracted"),  # further up than the camera's limit, before any learning
         (15, 0, "attentive"),  # upper attentive edge, inclusive
         (15.5, 0, "neutral"),
         (38, 0, "neutral"),  # upper neutral edge, inclusive
         (38.5, 0, "distracted"),
-        (0, 25, "attentive"),  # yaw just inside
-        (0, -25, "attentive"),
-        (0, 25.5, "distracted"),  # yaw just outside
-        (0, -25.5, "distracted"),
-        (30, 25, "neutral"),
-        (30, 25.5, "distracted"),  # yaw beyond 25 is distracted whatever the pitch
+        (0, 35, "attentive"),  # yaw just inside
+        (0, -35, "attentive"),
+        (0, 35.5, "distracted"),  # yaw just outside
+        (0, -35.5, "distracted"),
+        (0, 30, "attentive"),  # turning toward a teacher who walks across the room
+        (30, 35, "neutral"),
+        (30, 35.5, "distracted"),  # yaw beyond 35 is distracted whatever the pitch
         (90, 0, "distracted"),
         (-40, 0, "distracted"),
     ],

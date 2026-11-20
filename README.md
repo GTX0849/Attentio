@@ -2,7 +2,7 @@
 
 A laptop webcam worker classifies the person in view into attention states and sends one record per student per 30-second window to a FastAPI backend (PostgreSQL). A Streamlit dashboard reads only from the backend over HTTP. People sign in with an email and a password, and the backend decides what each role may read (see Signing in).
 
-The worker decides states with the rules in the `states:` section of `config/classpulse.yaml` (eyes-closed grace, look-down allowance, pitch and yaw bands). It feeds those rules with real readings from MediaPipe (head pitch and yaw, eyes closed, shoulders in view); see Real readings below.
+The worker decides states with the rules in the `states:` section of `config/classpulse.yaml` (eyes-closed grace, look-down allowance, pitch and yaw bands, and the learned front region). It feeds those rules with real readings from MediaPipe (head pitch and yaw, eyes closed, shoulders in view); see Real readings below.
 
 ## Layout
 
@@ -131,6 +131,16 @@ This fetches only the official MediaPipe `face_landmarker` and `pose_landmarker_
 - Both models run in VIDEO mode on the unmirrored camera frame. Only the preview is mirrored.
 
 **Calibration.** At launch, look at the screen for `perception.calibration_seconds` (3 s). The mean raw pitch and yaw over that time (face frames only) become the zero, and every later reading is relative to it. While calibrating, readings still go to the state rules but carry pitch 0 and yaw 0 (looking at the screen), so the first seconds count as Attentive. If nobody is in view, calibration waits for a face. Press the key in `perception.recalibrate_key` (`c`) in the preview window to calibrate again at any time. There is no key with `--no-preview`.
+
+**The front region (state rules).** A student counts as Attentive while facing the front of the room in any natural way: looking up at a standing teacher, turning toward one who walks across the room, slouching, leaning, sitting up. Out of the box (the `states:` section of `config/classpulse.yaml`) Attentive runs from 30 degrees up (pitch -30) to 15 degrees down (pitch +15), and up to 35 degrees to either side (|yaw| at most 35). Looking further up or further sideways is Distracted, as is a long look down, turning well to the side or back, and closed eyes. These angles are measured from a *reference direction*, not from calibration alone:
+
+- **Moving reference.** The median of head pitch and yaw over the last 120 s, learned all through the lecture, only from readings already inside the current front region (Attentive) and only while the face is present. It is capped at 15 degrees of pitch and 20 degrees of yaw from calibration, so it can follow a slow posture shift but never wander far. Effective pitch is pitch minus the reference pitch, and likewise for yaw.
+- **Personal spread.** How much the head varies around the reference while Attentive: the 90th percentile (nearest rank) of the absolute effective angle, kept separately for pitch and yaw. It sets this student's extents: up extent = k x pitch spread, sideways extent = k x yaw spread, with k = 2.5, kept between 15 and 40 degrees (up) or 15 and 45 degrees (sideways). A fidgety student gets wider extents, a still one tighter. Until 30 s of Attentive data are in the window, nothing is learned: the reference stays at calibration and the extents are the camera's limits above (30 up, 35 sideways).
+- **Fixed downward rule, never learned.** Up to +15 degrees below the reference is Attentive; +15 to +38 is Neutral and uses the 8 s look-down allowance (refilled by 2 s of continuous Attentive); beyond +38 is Distracted. A phone held in the lap is never learned as "front", because only Attentive readings teach the reference.
+- **Limits.** A sudden, permanent jump of the head beyond the student's extents (a 20 degree change of posture in one move) is not learned, because those readings are not Attentive; only gradual shifts are followed. Recalibration (`reset_learning()`) clears the reference and extents.
+- **Storage.** The learned profile lives in memory (`worker/front_region.py`, behind the `FrontRegionProfile` interface) and is discarded at the end of the session. Nothing is written to disk. A persistent store may be added once consent and retention are designed.
+
+Every number is in `states:` and `states.learning:` of `config/classpulse.yaml` (window, caps, k, minimum and maximum extents, data needed).
 
 **Sign flags.** Positive pitch must mean looking down, and the preview shows the value live. The signs were derived from the matrix maths and the live check showed sensible magnitudes, but a human pose could not be judged. If looking down shows a negative pitch, set `perception.invert_pitch: true` in `config/classpulse.yaml`. `invert_yaw` flips yaw; only its absolute value is used by the rules, so it is mostly cosmetic.
 

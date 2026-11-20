@@ -17,8 +17,14 @@ Rules (face, then eyes, then head direction)
 * Face absent: Distracted if shoulders are present, else Not visible.
 * Eyes closed: continuous closure under `eyes_closed_grace_s` is ignored (the
   head decides). From the grace period onward it is Distracted.
-* Head: Attentive/Neutral/Distracted from the pitch and yaw bands. Yaw beyond
-  the limit, or pitch outside the attentive and neutral bands, is Distracted.
+* Head: Attentive/Neutral/Distracted from the pitch and yaw bands, measured from
+  a reference direction that moves with the student (worker/front_region.py).
+  Attentive is the front region: up to the student's up extent above the
+  reference, up to `pitch_attentive_max_deg` below it, and within the sideways
+  extent either way. The extents are the camera's limits (`pitch_attentive_min_deg`,
+  `yaw_max_deg`) until enough has been learned. Looking further up or sideways
+  than the extents is Distracted; below the attentive band is Neutral up to
+  `pitch_neutral_max_deg`, then Distracted. The downward limits are never learned.
 * Looking down: time spent in the Neutral band uses up `look_down_allowance_s`
   of allowance. Once it is spent, the Neutral band is Distracted. The allowance
   refills only after `allowance_refill_s` of continuous Attentive.
@@ -38,6 +44,11 @@ Decisions on cases the ticket leaves open
   maximum) is Distracted and neither uses nor refills the allowance.
 * "Continuous" closure means consecutive closed readings; under sample-and-hold
   a closed reading is taken to stay closed until the next reading.
+* A reading's band is fixed when it arrives, with the reference and extents as
+  they were then. Learning from that reading changes later bands only, so
+  seconds already counted are never rewritten.
+* Only readings that are Attentive (the state, not just the band) and have a
+  face teach the reference. `reset_learning` (recalibration) clears it.
 * A reading whose timestamp is earlier than the previous one (clock stepped
   back) is treated as if it arrived at the previous timestamp.
 """
@@ -46,6 +57,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from shared.schema import AttentionState
+from worker.front_region import FrontRegionProfile, InMemoryFrontRegionProfile, LearningConfig
 from worker.readings import Reading
 
 # A state that starts at a time and holds until the next transition.
@@ -59,25 +71,29 @@ _NOT = AttentionState.NOT_VISIBLE
 
 @dataclass(frozen=True)
 class StateThresholds:
-    pitch_attentive_min_deg: float
-    pitch_attentive_max_deg: float
-    pitch_neutral_max_deg: float
-    yaw_max_deg: float
+    pitch_attentive_min_deg: float  # the camera's limit: how far up still counts, before anything is learned
+    pitch_attentive_max_deg: float  # fixed, never learned
+    pitch_neutral_max_deg: float  # fixed, never learned
+    yaw_max_deg: float  # the camera's limit for turning to either side, before anything is learned
     eyes_closed_grace_s: float
     look_down_allowance_s: float
     allowance_refill_s: float
+    learning: LearningConfig
 
     @classmethod
     def from_config(cls, raw: dict[str, Any]) -> "StateThresholds":
         """Read the top-level `states:` section of config/classpulse.yaml."""
         section = raw["states"]
-        return cls(**{name: float(section[name]) for name in cls.__dataclass_fields__})
+        numbers = {name: float(section[name]) for name in cls.__dataclass_fields__ if name != "learning"}
+        return cls(**numbers, learning=LearningConfig.from_config(section["learning"]))
 
 
 class StateClassifier:
-    def __init__(self, thresholds: StateThresholds) -> None:
+    def __init__(self, thresholds: StateThresholds, profile: FrontRegionProfile | None = None) -> None:
         self._th = thresholds
+        self._profile: FrontRegionProfile = profile or InMemoryFrontRegionProfile(thresholds.learning)
         self._held: Reading | None = None  # the reading currently being held
+        self._held_band: AttentionState = _DIS  # its head-direction band, fixed when it arrived
         self._now = 0.0  # time up to which transitions have been emitted
         self._state: AttentionState | None = None  # the state in force at _now
         self._closed_since: float | None = None  # start of the current closed-eyes run
@@ -89,6 +105,7 @@ class StateClassifier:
         t = max(reading.timestamp, self._now)
         out = self._advance(t)
         self._held = reading
+        self._held_band = self._band(reading)
         self._now = t
         if reading.face_present and reading.eyes_closed:
             if self._closed_since is None:
@@ -99,6 +116,8 @@ class StateClassifier:
         if state is _ATT:
             if self._attentive_since is None:
                 self._attentive_since = t
+            if reading.face_present:  # learn after classifying: this reading's band is already fixed
+                self._profile.learn(t, reading.pitch_deg, reading.yaw_deg)
         else:
             self._attentive_since = None
         self._state = state
@@ -108,6 +127,24 @@ class StateClassifier:
     def close(self, timestamp: float) -> list[Transition]:
         """End of stream: the state changes up to `timestamp`, which hold until then."""
         return self._advance(max(timestamp, self._now))
+
+    def reset_learning(self) -> None:
+        """Forget the learned reference and extents (call on recalibration). Counted seconds are untouched."""
+        self._profile.reset()
+
+    def reference(self) -> tuple[float, float]:
+        """The reference direction (pitch, yaw) relative to calibration, in degrees. Read-only; for displays."""
+        return self._profile.reference()
+
+    def extents(self) -> tuple[float, float]:
+        """How far up and how far to either side of the reference still counts as Attentive, in degrees.
+
+        The camera's limits from the config until enough has been learned. Read-only; for displays.
+        """
+        learned = self._profile.extents()
+        if learned is not None:
+            return learned
+        return -self._th.pitch_attentive_min_deg, self._th.yaw_max_deg
 
     def current_state(self, at: float) -> AttentionState | None:
         """The state in force at time `at` (not before the last reading), or None before any reading.
@@ -132,7 +169,7 @@ class StateClassifier:
         ):
             return th.look_down_allowance_s  # long enough attentive: the allowance has refilled
         used = self._down_used
-        if r.face_present and self._band(r) is _NEU:
+        if r.face_present and self._held_band is _NEU:
             used += at - self._now
         return max(0.0, th.look_down_allowance_s - used)
 
@@ -146,7 +183,7 @@ class StateClassifier:
         if r is None or t <= s:
             return out
         th = self._th
-        in_neutral_band = r.face_present and self._band(r) is _NEU
+        in_neutral_band = r.face_present and self._held_band is _NEU
 
         # Moments inside the interval where the held reading changes its state.
         trips: list[float] = []
@@ -182,13 +219,16 @@ class StateClassifier:
             self._down_used = 0.0
 
     def _band(self, r: Reading) -> AttentionState:
-        """Head direction alone: Attentive, Neutral or Distracted."""
+        """Head direction alone, from the reference and extents as they are now: Attentive, Neutral or Distracted."""
         th = self._th
-        if abs(r.yaw_deg) > th.yaw_max_deg:
+        ref_pitch, ref_yaw = self._profile.reference()
+        up, side = self.extents()
+        pitch = r.pitch_deg - ref_pitch
+        if abs(r.yaw_deg - ref_yaw) > side:
             return _DIS
-        if th.pitch_attentive_min_deg <= r.pitch_deg <= th.pitch_attentive_max_deg:
+        if -up <= pitch <= th.pitch_attentive_max_deg:
             return _ATT
-        if th.pitch_attentive_max_deg < r.pitch_deg <= th.pitch_neutral_max_deg:
+        if th.pitch_attentive_max_deg < pitch <= th.pitch_neutral_max_deg:
             return _NEU
         return _DIS
 
@@ -199,7 +239,7 @@ class StateClassifier:
             return _DIS if r.shoulders_present else _NOT
         if self._closed_since is not None and x >= self._closed_since + th.eyes_closed_grace_s:
             return _DIS
-        band = self._band(r)
+        band = self._held_band
         if band is _NEU and x >= s + (th.look_down_allowance_s - self._down_used):
             return _DIS
         return band

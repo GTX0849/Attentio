@@ -17,15 +17,33 @@ auth:
   login_window_minutes: 5
 
 # Attention state rules (worker/states.py). Angles are degrees relative to the
-# student's calibration pose; positive pitch = looking down.
+# student's calibration pose; positive pitch = looking down. The bands below are the
+# camera's limits, used until enough is learned about the student (`learning:` below);
+# they are measured from a reference direction that moves with the student.
 states:
-  pitch_attentive_min_deg: -10   # attentive pitch band: -10 to +15
-  pitch_attentive_max_deg: 15
-  pitch_neutral_max_deg: 38      # neutral band: above +15 up to +38; beyond that (or below -10) is distracted
-  yaw_max_deg: 25                # |yaw| above this is distracted
+  pitch_attentive_min_deg: -30   # attentive pitch band: -30 (looking up) to +15; this is the default "up" extent
+  pitch_attentive_max_deg: 15    # downward limits are fixed and never learned
+  pitch_neutral_max_deg: 38      # neutral band: above +15 up to +38; beyond that (or above the up extent) is distracted
+  yaw_max_deg: 35                # |yaw| above this is distracted; this is the default sideways extent
   eyes_closed_grace_s: 1.5       # closure shorter than this is ignored; from here on it is distracted
   look_down_allowance_s: 8       # seconds of looking down that stay neutral
   allowance_refill_s: 2          # continuous attentive seconds needed to refill the allowance
+  # The front region, learned per student during the lecture (worker/front_region.py), only from
+  # Attentive readings with a face. Discarded at session end and on recalibration.
+  learning:
+    window_s: 120                # reference direction = median of pitch and yaw over this many seconds
+    max_samples: 2400            # bound on stored samples, whatever the reading rate
+    max_gap_s: 2                 # a gap between two readings counts as at most this much data
+    update_interval_s: 1         # the median and spread are recomputed at most this often
+    min_attentive_s: 30          # seconds of Attentive data needed before anything is learned
+    max_reference_pitch_deg: 15  # the reference never moves further than this from calibration (pitch)
+    max_reference_yaw_deg: 20    # ... or this (yaw)
+    spread_percentile: 90        # personal spread = this percentile of |angle - reference| while Attentive
+    spread_multiplier: 2.5       # extent = clamp(this x spread, minimum, maximum)
+    min_up_extent_deg: 15        # how far up (above the reference) still counts as Attentive
+    max_up_extent_deg: 40
+    min_side_extent_deg: 15      # how far to either side of the reference still counts as Attentive
+    max_side_extent_deg: 45
 
 # Student and teacher figures (backend/metrics.py).
 scores:
@@ -50,6 +68,9 @@ perception:
   shoulder_visibility_threshold: 0.5   # both shoulders' pose visibility at or above this = shoulders present
   invert_pitch: false            # flip if looking down shows as negative pitch in the preview
   invert_yaw: false              # flip the sign of yaw (it only matters for the absolute value, so rarely needed)
+  max_faces: 5                   # most faces the face model looks for in a frame; only the locked (largest at calibration) one is scored
+  max_poses: 5                   # most bodies the pose model looks for; shoulders come from the body inside the locked face's box
+  face_lost_after_s: 1           # the locked face missing for longer than this counts as no face; it is never swapped for another
 
 # Simulated classroom history (python -m simulator seed). Effects are in attention points
 # (percentage points of attention, attentive / (attentive + distracted)).
