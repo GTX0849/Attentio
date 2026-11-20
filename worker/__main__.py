@@ -22,6 +22,11 @@ def main() -> int:
     )
     parser.add_argument("--debug", action="store_true", help="log every reading (pitch, yaw, eyes, shoulders, state)")
     parser.add_argument("--spool", type=Path, default=DEFAULT_SPOOL, help="unsent-record spool file")
+    parser.add_argument(
+        "--tune",
+        action="store_true",
+        help="TEST SESSIONS ONLY: label what you are doing with keys 0-5 and save the angles to .spool/tuning/",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if args.debug:
@@ -34,6 +39,7 @@ def main() -> int:
         preview=not args.no_preview,
         camera_index=args.camera_index,
         detector=args.detector,
+        tune=args.tune,
     )
 
 

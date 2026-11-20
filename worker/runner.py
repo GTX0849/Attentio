@@ -9,6 +9,10 @@
 * Delivery thread: sends finished windows in the background (see worker/concurrency.py),
   so a slow or unreachable backend never freezes the preview.
 
+Tune mode (`--tune`, test sessions only; see worker/tuning.py): the display thread turns the
+number keys into a label held in a `LabelHolder`, and the scoring thread saves each tick's
+angles with that label through a `TuneRecorder`.
+
 All decisions still live in testable modules; this file only wires them together.
 """
 
@@ -16,13 +20,13 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 
 from shared.config import PROJECT_ROOT, Config, service_key
 from worker.client import NO_KEY_MESSAGE, HttpSender
-from worker.concurrency import BackgroundDelivery, LatestFrame, Status, StatusBoard
+from worker.concurrency import BackgroundDelivery, LabelHolder, LatestFrame, Status, StatusBoard
 from worker.delivery import Spool
 from worker.detector import HaarReadingSource
 from worker.perception import Diagnostics, PerceptionSettings, PerceptionSource
@@ -30,6 +34,13 @@ from worker.preview import draw_preview
 from worker.readings import ReadingSource
 from worker.states import StateThresholds
 from worker.tracker import AttentionTracker
+from worker.tuning import (
+    DEFAULT_TUNING_DIR,
+    TuneRecorder,
+    format_summary,
+    handle_tune_key,
+    on_tune_finished as default_on_tune_finished,
+)
 
 log = logging.getLogger("worker")
 
@@ -47,7 +58,15 @@ def run(
     preview: bool = True,
     camera_index: int = 0,
     detector: str = "mediapipe",
+    tune: bool = False,
+    tuning_dir: Path = DEFAULT_TUNING_DIR,
+    on_tune_finished: Callable[[Path, str], None] = default_on_tune_finished,
 ) -> int:
+    """Run until q or Ctrl+C. With `tune`, label keys and a tune file are added (test sessions only);
+    `on_tune_finished(path, camera_id)` is called once that file is closed."""
+    if tune and detector == "haar":
+        log.error("--tune needs the mediapipe detector (the haar fallback has no head angles to save)")
+        return 1
     source: ReadingSource
     recalibrate_key = ""
     if detector == "haar":
@@ -83,12 +102,18 @@ def run(
     board = StatusBoard()
     stop = threading.Event()
     recalibrate = threading.Event()
+    labels = LabelHolder() if tune else None
+    recorder = TuneRecorder(camera, tuning_dir) if tune else None
+    if recorder is not None:
+        log.info("Tune mode: saving labelled angles to %s (test sessions only)", recorder.path)
+        if not preview:
+            log.warning("Tune mode without the preview has no keys: every row will carry label 0")
 
     threads = [
         threading.Thread(target=_capture_loop, args=(capture, latest, stop), name="capture", daemon=True),
         threading.Thread(
             target=_scoring_loop,
-            args=(source, tracker, delivery, latest, board, stop, recalibrate, config.target_fps),
+            args=(source, tracker, delivery, latest, board, stop, recalibrate, config.target_fps, recorder, labels),
             name="scoring",
             daemon=True,
         ),
@@ -100,7 +125,7 @@ def run(
 
     try:
         if preview:
-            _display_loop(latest, board, stop, recalibrate, recalibrate_key)
+            _display_loop(latest, board, stop, recalibrate, recalibrate_key, labels)
         else:
             while not stop.is_set():
                 time.sleep(0.2)
@@ -117,6 +142,11 @@ def run(
         if preview:
             cv2.destroyAllWindows()
         delivery.close()  # sends the partial window the scoring thread flushed
+        if recorder is not None:
+            summary = recorder.close()
+            print(format_summary(summary), flush=True)
+            if summary.path is not None:
+                on_tune_finished(summary.path, summary.camera_id)  # CLA-21 hooks its analysis in here
         log.info("Stopped.")
     return 0
 
@@ -139,6 +169,8 @@ def _scoring_loop(
     stop: threading.Event,
     recalibrate: threading.Event,
     target_fps: float,
+    recorder: TuneRecorder | None = None,
+    labels: LabelHolder | None = None,
 ) -> None:
     interval = 1.0 / target_fps
     next_tick = time.time()
@@ -164,17 +196,18 @@ def _scoring_loop(
                 if isinstance(source, PerceptionSource) and source.calibrating
                 else None
             )
-            board.set(
-                Status(
-                    reading,
-                    tracker.current_state(now),
-                    tracker.look_down_remaining_s(now),
-                    calibration_left,
-                    diagnostics=diagnostics,
-                    reference=tracker.reference(),
-                    region=tracker.extents(),
-                )
+            status = Status(
+                reading,
+                tracker.current_state(now),
+                tracker.look_down_remaining_s(now),
+                calibration_left,
+                diagnostics=diagnostics,
+                reference=tracker.reference(),
+                region=tracker.extents(),
             )
+            board.set(status)
+            if recorder is not None:
+                recorder.record(status, labels.get() if labels is not None else 0, now)
             log.debug(
                 "reading faces=%d face=%s shoulders=%s pitch=%+.1f yaw=%+.1f eyes_closed=%s state=%s",
                 diagnostics.face_count if diagnostics is not None else 0,
@@ -205,6 +238,7 @@ def _display_loop(
     stop: threading.Event,
     recalibrate: threading.Event,
     recalibrate_key: str,
+    labels: LabelHolder | None = None,
 ) -> None:
     shown_sequence = 0
     show_landmarks = False  # toggled with m; always on while calibrating (see draw_preview)
@@ -227,6 +261,7 @@ def _display_loop(
                     region=status.region,
                     recalibrate_key=recalibrate_key or None,
                     landmarks_key=LANDMARKS_KEY,
+                    tune_label=labels.get() if labels is not None else None,
                 ),
             )
         key = cv2.waitKey(5) & 0xFF  # also pumps the window's events
@@ -236,3 +271,5 @@ def _display_loop(
             show_landmarks = not show_landmarks
         elif recalibrate_key and key == ord(recalibrate_key):
             recalibrate.set()
+        else:
+            handle_tune_key(key, labels)  # the number keys, only in tune mode

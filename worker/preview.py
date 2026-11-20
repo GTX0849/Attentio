@@ -17,6 +17,8 @@ from shared.schema import AttentionState
 from worker import face_mesh
 from worker.perception import Diagnostics, FaceDiagnostic
 from worker.readings import Reading
+from worker.tuning import KEY_HINTS as TUNE_KEY_HINTS
+from worker.tuning import label_text
 
 # The dashboard's state colours (see the dashboard theme), as RGB hex.
 _STATE_HEX = {
@@ -92,6 +94,7 @@ def draw_preview(
     region: tuple[float, float] | None = None,
     recalibrate_key: str | None = "c",
     landmarks_key: str | None = "m",
+    tune_label: int | None = None,
 ) -> Any:
     """A mirrored copy of `frame` with the banner, readouts and (optionally) the landmark overlay.
 
@@ -100,7 +103,9 @@ def draw_preview(
     `overlay` turns the landmark overlay on; it is always on while calibrating. `reference`
     is the learned (pitch, yaw) centre of the front region and `region` its (up, side)
     extents in degrees; both None until a learner provides them. A key set to None is left
-    out of the key hints. Everything is drawn after the mirroring, so text reads normally.
+    out of the key hints. `tune_label` (0 to 5) is set only in tune mode: it adds the tune chip
+    under the banner and the label key hints on the left of the hints bar. Everything is drawn
+    after the mirroring, so text reads normally.
     """
     out = cv2.flip(frame, 1)
     height, width = out.shape[:2]
@@ -119,7 +124,9 @@ def draw_preview(
 
     _draw_banner(out, "Calibrating" if calibrating else _label(state), diagnostics, colour, text_colour, scale)
     _draw_readout(out, reading, allowance_left_s, diagnostics, reference, region, scale)
-    _draw_key_hints(out, recalibrate_key, landmarks_key if diagnostics is not None else None, scale)
+    _draw_key_hints(out, recalibrate_key, landmarks_key if diagnostics is not None else None, scale, tune_label is not None)
+    if tune_label is not None:
+        _draw_tune_chip(out, tune_label, scale)
     if calibration_left_s is not None:
         headline = diagnostics.calibration_reason if diagnostics and diagnostics.calibration_reason else "Calibrating"
         detail = diagnostics.calibration_detail if diagnostics and diagnostics.calibration_reason else None
@@ -214,7 +221,9 @@ def _draw_readout(
         cv2.putText(out, line, (x0 + pad, y), _MONO, font_scale, _WHITE, max(1, round(scale)), cv2.LINE_AA)
 
 
-def _draw_key_hints(out: Any, recalibrate_key: str | None, landmarks_key: str | None, scale: float) -> None:
+def _draw_key_hints(
+    out: Any, recalibrate_key: str | None, landmarks_key: str | None, scale: float, tune: bool = False
+) -> None:
     height, width = out.shape[:2]
     top = height - _px(_HINTS_H, scale)
     _shade(out, 0, top, width, height)
@@ -226,12 +235,67 @@ def _draw_key_hints(out: Any, recalibrate_key: str | None, landmarks_key: str | 
     text = "   ".join(parts)
     font_scale = 0.8 * scale
     tw, th = _text_size(text, _MONO, font_scale, 1)
+    margin = _px(_MARGIN, scale)
     cv2.putText(
         out,
         text,
-        (width - _px(_MARGIN, scale) - tw, top + (_px(_HINTS_H, scale) + th) // 2),
+        (width - margin - tw, top + (_px(_HINTS_H, scale) + th) // 2),
         _MONO,
         font_scale,
+        _WHITE,
+        max(1, round(scale)),
+        cv2.LINE_AA,
+    )
+    if tune:  # the label keys, on the left, in the tune colour; smaller if they would run into the usual keys
+        room = width - 3 * margin - tw
+        hint_w, _ = _text_size(TUNE_KEY_HINTS, _MONO, font_scale, 1)
+        hint_scale = font_scale * min(1.0, room / hint_w) if hint_w > 0 else font_scale
+        _, hint_h = _text_size(TUNE_KEY_HINTS, _MONO, hint_scale, 1)
+        cv2.putText(
+            out,
+            TUNE_KEY_HINTS,
+            (margin, top + (_px(_HINTS_H, scale) + hint_h) // 2),
+            _MONO,
+            hint_scale,
+            _CALIBRATING,
+            max(1, round(scale)),
+            cv2.LINE_AA,
+        )
+
+
+def _draw_tune_chip(out: Any, label: int, scale: float) -> None:
+    """Top-right, under the banner: a dark panel with a 4 px yellow left edge, a small yellow TUNE marker
+    and the current label in white."""
+    height, width = out.shape[:2]
+    text = label_text(label)
+    marker_scale, text_scale = 0.7 * scale, 0.6 * scale
+    marker_w, marker_h = _text_size("TUNE", _MONO, marker_scale, 1)
+    text_w, text_h = _text_size(text, _FONT, text_scale, max(1, round(scale)))
+    edge, pad, gap = _px(4, scale), _px(12, scale), _px(10, scale)
+    box_w = edge + pad + marker_w + gap + text_w + pad
+    box_h = _px(40, scale)
+    x1 = width - _px(_MARGIN, scale)
+    x0 = x1 - box_w
+    y0 = _px(_BANNER_H, scale) + _px(12, scale)
+    _shade(out, x0, y0, x1, y0 + box_h)
+    cv2.rectangle(out, (x0, y0), (x0 + edge - 1, y0 + box_h - 1), _CALIBRATING, -1)
+    mid = y0 + box_h // 2
+    cv2.putText(
+        out,
+        "TUNE",
+        (x0 + edge + pad, mid + marker_h // 2),
+        _MONO,
+        marker_scale,
+        _CALIBRATING,
+        max(1, round(scale)),
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        out,
+        text,
+        (x0 + edge + pad + marker_w + gap, mid + text_h // 2),
+        _FONT,
+        text_scale,
         _WHITE,
         max(1, round(scale)),
         cv2.LINE_AA,

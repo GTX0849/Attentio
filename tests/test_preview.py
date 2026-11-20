@@ -1,5 +1,7 @@
 """Preview helpers that need no window: colours and text."""
 
+from typing import Any
+
 import numpy as np
 
 from shared.schema import AttentionState
@@ -190,3 +192,49 @@ def test_the_quality_line_is_in_the_readout_panel() -> None:
     framed = Diagnostics(framing=FramingReadout(100.0, 18.0, 0.9))
     with_line = draw_preview(frame, reading, AttentionState.ATTENTIVE, 8.0, None, diagnostics=framed)
     assert bright(with_line[480:660, :600]) > bright(without[480:660, :600])  # one more line of text
+
+
+# -- tune mode -------------------------------------------------------------------------
+
+
+def tune_frames(label: int | None) -> Any:
+    frame = np.zeros((720, 1280, 3), np.uint8)
+    reading = Reading(timestamp=1.0, face_present=True, shoulders_present=True)
+    return draw_preview(frame, reading, AttentionState.ATTENTIVE, 8.0, None, diagnostics=Diagnostics(), tune_label=label)
+
+
+def test_tune_mode_draws_the_tune_chip_under_the_banner_on_the_right() -> None:
+    off, on = tune_frames(None), tune_frames(1)
+    chip_off, chip_on = off[52:110, 880:], on[52:110, 880:]  # below the 48 px banner, top-right
+    assert count_pixels(chip_off, CALIBRATING_BGR) == 0
+    assert count_pixels(chip_on, CALIBRATING_BGR) > 100  # the yellow left edge and the TUNE marker
+    assert bright(chip_on) > 100  # the label in white
+    assert (chip_on != chip_off).any()
+    assert (on[110:660] == off[110:660]).all()  # nothing else in the picture changed (frame is black)
+
+
+def test_the_nothing_label_draws_the_chip_too() -> None:
+    chip = tune_frames(0)[52:110, 880:]
+    assert count_pixels(chip, CALIBRATING_BGR) > 100
+    assert bright(chip) > 100
+
+
+def yellowish(region: np.ndarray) -> int:
+    """Pixels close to #FFD34D (thin anti-aliased text never reaches the exact colour)."""
+    b, g, r = region[..., 0].astype(int), region[..., 1].astype(int), region[..., 2].astype(int)
+    return int(((r > 200) & (g > 150) & (b < 140)).sum())
+
+
+def test_tune_mode_puts_the_label_hints_on_the_left_in_yellow_and_keeps_the_usual_keys_on_the_right() -> None:
+    off, on = tune_frames(None), tune_frames(0)
+    bar_off, bar_on = off[684:], on[684:]
+    assert yellowish(bar_off) == 0
+    assert yellowish(bar_on[:, :800]) > 200  # yellow hints on the left
+    assert yellowish(bar_on[:, 800:]) == 0  # the right side is still the white usual keys
+    assert (bar_on[:, 800:] == bar_off[:, 800:]).all()  # "q quit c recalibrate m landmarks" is where it was
+
+
+def test_tune_mode_still_draws_on_a_small_frame() -> None:
+    reading = Reading(timestamp=1.0, face_present=True, shoulders_present=True)
+    out = draw_preview(np.zeros((240, 320, 3), np.uint8), reading, AttentionState.NEUTRAL, 8.0, None, tune_label=3)
+    assert out.shape == (240, 320, 3)

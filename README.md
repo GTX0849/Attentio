@@ -185,6 +185,31 @@ The **landmark overlay** is on by itself while calibrating and otherwise toggled
 
 If the readings look off, run `python -m worker --student STU001 --camera CAM1 --debug --no-preview` to log pitch, yaw, eyes and state for every frame.
 
+## Tuning sessions
+
+**For test sessions only.** Tune mode records what a person is doing next to their head angles, so the front-region limits can be tuned from real evidence. Never use it in a real lecture with students who have not agreed to it.
+
+```
+python -m worker --student STU001 --camera CAM1 --tune
+```
+
+The worker runs as usual (scoring, preview, records sent to the backend and the `q`, `c` and `m` keys are unchanged). The person testing then presses a number key in the preview window to say what they are doing; the label starts at 0:
+
+| Key | Label |
+| --- | --- |
+| 1 | watching the teacher |
+| 2 | taking notes |
+| 3 | phone in lap |
+| 4 | talking to a neighbour |
+| 5 | eyes closed |
+| 0 | nothing (the default) |
+
+The preview shows a yellow "TUNE" chip under the state banner with the current label (for example "1 - Watching the teacher"), and the label keys on the left of the key hints bar. Without `--tune` the number keys do nothing and none of this is drawn. Tune mode needs the MediaPipe detector and the preview (without the preview there are no keys and every row gets label 0).
+
+**What is saved.** Each run writes its own CSV file, `.spool/tuning/<camera id>/<UTC timestamp>.csv` (git-ignored; odd characters in the camera id become `_`). It has one row per scoring tick (about 10 a second), only while a face is locked and in view and calibration has finished, so there are no rows during calibration or when nobody is in view. The first line is `# classpulse tune v1 camera=<id>`, the second is the header, and the columns are `t` (epoch seconds), `label` (0 to 5), `pitch` and `yaw` (relative to calibration), `ref_pitch` and `ref_yaw` (the learned reference at that moment), `rel_pitch` and `rel_yaw` (pitch and yaw minus the reference), `eyes_closed` (0 or 1), `face_size_pct` and `state`. No names, student ids, images or other faces are saved, and the records sent to the backend are not changed. The full format is in the docstring of `worker/tuning.py`.
+
+The file is written in small buffered steps (flushed about once a second and on exit), so it never slows the preview. When you quit with `q` or Ctrl+C the worker prints the file path and the number of rows per label. Delete the files you no longer need.
+
 ## Timetable, lectures and sessions
 
 Every attention record is tied to a lecture: a teacher, a subject, a section and a time.

@@ -77,6 +77,22 @@ class StatusBoard:
             return self._status
 
 
+class LabelHolder:
+    """The tune-mode label (0 to 5), set by the display thread's keys and read by the scoring thread."""
+
+    def __init__(self, label: int = 0) -> None:
+        self._lock = threading.Lock()
+        self._label = label
+
+    def set(self, label: int) -> None:
+        with self._lock:
+            self._label = label
+
+    def get(self) -> int:
+        with self._lock:
+            return self._label
+
+
 _STOP = object()
 
 
