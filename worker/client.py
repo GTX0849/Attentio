@@ -2,6 +2,7 @@
 
 import requests
 
+from shared.config import http_timeout
 from shared.schema import AttentionRecord
 from worker.delivery import SendError
 
@@ -14,11 +15,15 @@ NO_KEY_MESSAGE = (
 
 
 class HttpSender:
-    """Posts windows to `/api/records`, with the service key in `X-ClassPulse-Key` when there is one."""
+    """Posts windows to `/api/records`, with the service key in `X-ClassPulse-Key` when there is one.
 
-    def __init__(self, backend_url: str, timeout: float = 3.0, service_key: str | None = None) -> None:
+    `timeout` defaults to 3 s, or CLASSPULSE_HTTP_TIMEOUT when set. Keep it short: a send that times out
+    (a sleeping free host, say) leaves the records in the spool, which retries them.
+    """
+
+    def __init__(self, backend_url: str, timeout: float | None = None, service_key: str | None = None) -> None:
         self._url = backend_url.rstrip("/") + "/api/records"
-        self._timeout = timeout
+        self._timeout = timeout if timeout is not None else http_timeout(3.0)
         self._headers = {SERVICE_KEY_HEADER: service_key} if service_key else {}
 
     def send(self, records: list[AttentionRecord]) -> None:

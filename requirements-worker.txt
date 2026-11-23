@@ -1,0 +1,14 @@
+# The webcam worker, which runs on the laptop next to the camera and sends records to the backend over HTTP.
+# OpenCV 4.x on purpose: 5.x no longer bundles the Haar cascade files the temporary
+# face detector uses. mediapipe pulls in opencv-contrib-python, so keep both on the same 4.x.
+opencv-python>=4.9,<5
+opencv-contrib-python>=4.9,<5
+mediapipe>=0.10
+numpy>=1.26
+requests>=2.32
+altair>=5.3  # the tuning charts (python -m worker.autotune)
+# shared/ is imported by the worker:
+pydantic>=2.7,<3  # shared/schema.py
+python-dotenv>=1.0  # shared/config.py reads .env
+pyyaml>=6.0  # shared/config.py reads config/classpulse.yaml
+tzdata  # IANA time zone data; Windows has none of its own

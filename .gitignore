@@ -14,3 +14,6 @@ models/
 # Tuning charts hold raw head-angle points from tuning runs: local only, never committed.
 # The small limits YAML and its history in config/tuned/ stay committable.
 config/tuned/*.html
+
+# Streamlit secrets: the real file never goes in git (only secrets.toml.example does)
+.streamlit/secrets.toml

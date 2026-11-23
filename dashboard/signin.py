@@ -14,7 +14,7 @@ from pathlib import Path
 import streamlit as st
 
 from dashboard import api, session
-from dashboard.api import SignInError
+from dashboard.api import WAKING_UP_MESSAGE, SignInError
 from dashboard.theme import (
     BORDER,
     PRIMARY,
@@ -52,7 +52,7 @@ PRIVACY = (
 ERRORS = {
     "invalid": "Email or password is incorrect",
     "rate_limited": "Too many attempts. Try again in a few minutes",
-    "unreachable": "Cannot reach the ClassPulse backend. Check that it is running, then try again",
+    "unreachable": WAKING_UP_MESSAGE,
     "error": "Sign-in did not work. Try again in a moment",
     "empty": "Enter your email and password",
 }

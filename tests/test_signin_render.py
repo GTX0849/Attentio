@@ -156,7 +156,7 @@ def test_too_many_attempts_and_an_unreachable_backend_have_their_own_plain_messa
 ) -> None:
     for kind, message in (
         ("rate_limited", "Too many attempts. Try again in a few minutes"),
-        ("unreachable", "Cannot reach the ClassPulse backend. Check that it is running, then try again"),
+        ("unreachable", "The backend is waking up (free hosting sleeps when idle). Refresh in a moment"),
     ):
         def login(url: str, email: str, password: str, kind: str = kind) -> dict[str, Any]:
             raise SignInError(kind)

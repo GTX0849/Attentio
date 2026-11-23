@@ -1,0 +1,23 @@
+# Render Blueprint: the ClassPulse backend as one free web service (see docs/deploy.md).
+# Values for DATABASE_URL and CLASSPULSE_SERVICE_KEY are typed into Render's dashboard when the
+# Blueprint is created. Never put them in this file.
+# The Python version comes from .python-version (3.12) at the repository root.
+services:
+  - type: web
+    name: classpulse-backend
+    runtime: python
+    plan: free
+    region: singapore  # near Neon's Singapore region; remove this line for Render's default (oregon)
+    branch: main
+    buildCommand: pip install -r requirements-backend.txt
+    startCommand: python -m backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: CLASSPULSE_HOST  # Render reaches the service from outside the machine, so not loopback
+        value: 0.0.0.0
+      - key: DATABASE_URL  # Neon's connection string
+        sync: false
+      - key: CLASSPULSE_SERVICE_KEY  # the key the laptop worker sends; any long random value
+        sync: false
+      - key: CLASSPULSE_TIMEZONE
+        value: Asia/Kolkata

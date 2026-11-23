@@ -1,0 +1,12 @@
+# The backend (FastAPI + PostgreSQL) and the accounts command line. This is what Render installs.
+# No MediaPipe, OpenCV, NumPy, pandas or Streamlit: the backend does not import them.
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9  # timetable and marks upload (multipart form)
+tzdata  # IANA time zone data; Windows has none of its own
+sqlalchemy>=2.0,<3
+psycopg[binary]>=3.2,<4
+pydantic>=2.7,<3
+python-dotenv>=1.0  # shared/config.py reads .env
+pyyaml>=6.0  # shared/config.py reads config/classpulse.yaml
+openpyxl>=3.1  # marks upload as .xlsx

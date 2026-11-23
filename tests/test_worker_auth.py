@@ -68,3 +68,13 @@ def test_a_rejected_record_is_still_permanent(monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(SendError) as err:
         HttpSender("http://b", service_key="k").send([RECORD])
     assert err.value.permanent
+
+
+def test_the_sender_waits_three_seconds_unless_the_timeout_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = fake_post(monkeypatch, 200)
+    monkeypatch.delenv("CLASSPULSE_HTTP_TIMEOUT", raising=False)
+    HttpSender("http://b").send([RECORD])
+    monkeypatch.setenv("CLASSPULSE_HTTP_TIMEOUT", "20")
+    HttpSender("http://b").send([RECORD])
+    HttpSender("http://b", timeout=1.5).send([RECORD])  # an explicit timeout always wins
+    assert [call["timeout"] for call in seen] == [3.0, 20.0, 1.5]

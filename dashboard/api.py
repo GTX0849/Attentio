@@ -7,8 +7,14 @@ import requests
 
 from dashboard import session
 from dashboard.session import SessionExpired
+from shared.config import http_timeout
 
-__all__ = ["BackendError", "SessionExpired", "SignInError"]
+__all__ = ["BackendError", "SessionExpired", "SignInError", "WAKING_UP_MESSAGE"]
+
+DEFAULT_TIMEOUT_SECONDS = 10.0
+# Free hosting sleeps when idle and takes up to a minute to wake: a timeout or a refused connection
+# then almost always means "try again shortly", so that is what the person is told.
+WAKING_UP_MESSAGE = "The backend is waking up (free hosting sleeps when idle). Refresh in a moment"
 
 
 class BackendError(Exception):
@@ -38,8 +44,17 @@ def _call(
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         resp = requests.request(
-            method, url, params=params, json=json, files=files, data=data, headers=headers, timeout=10
+            method,
+            url,
+            params=params,
+            json=json,
+            files=files,
+            data=data,
+            headers=headers,
+            timeout=http_timeout(DEFAULT_TIMEOUT_SECONDS),
         )
+    except (requests.Timeout, requests.ConnectionError) as e:
+        raise BackendError(WAKING_UP_MESSAGE) from e
     except requests.RequestException as e:
         raise BackendError(f"Cannot reach the backend at {backend_url}: {e}") from e
     if resp.status_code == 401 and token:
@@ -61,7 +76,7 @@ def login(backend_url: str, email: str, password: str) -> dict[str, Any]:
     """
     url = f"{backend_url.rstrip('/')}/api/auth/login"
     try:
-        resp = requests.post(url, json={"email": email, "password": password}, timeout=10)
+        resp = requests.post(url, json={"email": email, "password": password}, timeout=http_timeout(DEFAULT_TIMEOUT_SECONDS))
     except requests.RequestException as e:
         raise SignInError("unreachable") from e
     if resp.status_code == 401:

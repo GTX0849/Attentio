@@ -1,23 +1,9 @@
-fastapi>=0.115
-uvicorn>=0.30
-python-multipart>=0.0.9  # timetable CSV upload (multipart form)
-tzdata  # IANA time zone data; Windows has none of its own
-sqlalchemy>=2.0,<3
-psycopg[binary]>=3.2,<4
-pydantic>=2.7,<3
-python-dotenv>=1.0
-pyyaml>=6.0
-streamlit>=1.57
-requests>=2.32
-pandas>=2.2
-altair>=5.3
-# OpenCV 4.x on purpose: 5.x no longer bundles the Haar cascade files the temporary
-# face detector uses. mediapipe pulls in opencv-contrib-python, so keep both on the same 4.x.
-opencv-python>=4.9,<5
-opencv-contrib-python>=4.9,<5
-mediapipe>=0.10
-numpy>=1.26
-openpyxl>=3.1
+# Everything for local development: the three deployable parts plus the test and type-check tools.
+# Hosted deployments install one part each (see docs/deploy.md):
+#   Render: requirements-backend.txt   Streamlit Cloud: dashboard/requirements.txt   Laptop worker: requirements-worker.txt
+-r requirements-backend.txt
+-r dashboard/requirements.txt
+-r requirements-worker.txt
 pytest>=8.0
 httpx>=0.27
 mypy>=1.10

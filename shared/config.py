@@ -1,5 +1,6 @@
 """Loads the shared YAML configuration and the database URLs from .env."""
 
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,18 +45,60 @@ def _env(name: str) -> str | None:
     return os.environ.get(name) or None
 
 
+def env_setting(name: str) -> str | None:
+    """An environment variable (or a line of .env), None when unset or empty."""
+    return _env(name)
+
+
+_PSYCOPG_SCHEME = "postgresql+psycopg://"
+
+
+def normalise_database_url(url: str) -> str:
+    """Point a `postgres://` or `postgresql://` URL at the installed driver (psycopg 3).
+
+    Managed hosts (Neon, Render, Heroku) hand out plain `postgres://` or `postgresql://` URLs, which
+    SQLAlchemy would send to psycopg2, and that is not installed. Everything after the scheme,
+    including query parameters such as `sslmode` and `channel_binding`, is kept exactly as it was.
+    Any other URL is returned unchanged. Never log the result: it carries the password.
+    """
+    url = url.strip()
+    for scheme in ("postgres://", "postgresql://"):
+        if url.startswith(scheme):
+            return _PSYCOPG_SCHEME + url[len(scheme) :]
+    return url
+
+
 def database_url() -> str:
     url = _env("DATABASE_URL")
     if url is None:
         raise RuntimeError(
             "DATABASE_URL is not set. Copy .env.example to .env and fill it in."
         )
-    return url
+    return normalise_database_url(url)
 
 
 def test_database_url() -> str | None:
     """None when TEST_DATABASE_URL is not configured (tests then skip)."""
-    return _env("TEST_DATABASE_URL")
+    url = _env("TEST_DATABASE_URL")
+    return normalise_database_url(url) if url else None
+
+
+HTTP_TIMEOUT_ENV = "CLASSPULSE_HTTP_TIMEOUT"
+
+
+def http_timeout(default: float) -> float:
+    """Seconds to wait for the backend: CLASSPULSE_HTTP_TIMEOUT when it is a positive number, else `default`.
+
+    A free host sleeps when idle and takes up to a minute to wake, so a hosted dashboard sets about 75.
+    """
+    raw = _env(HTTP_TIMEOUT_ENV)
+    if raw is None:
+        return default
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return default
+    return seconds if math.isfinite(seconds) and seconds > 0 else default
 
 
 SERVICE_KEY_ENV = "CLASSPULSE_SERVICE_KEY"

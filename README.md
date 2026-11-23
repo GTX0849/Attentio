@@ -39,7 +39,7 @@ TEST_DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/cla
 
 Also put a long random value in `.env` as `CLASSPULSE_SERVICE_KEY` (used by the worker and the simulator, see Signing in), for example the output of `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
-You do not need to create the databases. When the backend (or the tests) start, a missing database is created by connecting to the server's `postgres` database with the same credentials. Tables are created automatically and the demo data is seeded: room `R101`, camera `CAM1`, student `STU001`. `.env` is git-ignored; never commit it.
+You do not need to create the databases. When the backend (or the tests) start, the database in the URL is used if it exists; if it is missing it is created by connecting to the server's `postgres` database with the same credentials (a hosted database such as Neon's must already exist, and is used as it is). Tables are created automatically and the demo data is seeded: room `R101`, camera `CAM1`, student `STU001`. `.env` is git-ignored; never commit it.
 
 Nobody can sign in until an account exists. After the backend has run once (or right away: the command creates the tables too), make the first admin:
 
@@ -53,13 +53,13 @@ It asks for the password twice. The rest of the accounts are in Signing in.
 
 Use three terminals, each with the venv active, in the project root.
 
-**Backend** (binds to 127.0.0.1:8000 only):
+**Backend** (binds to 127.0.0.1:8000 only unless `CLASSPULSE_HOST` says otherwise):
 
 ```powershell
 python -m backend
 ```
 
-Equivalent: `python -m uvicorn backend.main:create_app --factory --host 127.0.0.1 --port 8000`. API docs are at http://127.0.0.1:8000/docs.
+Set `CLASSPULSE_HOST` and `PORT` to listen elsewhere (a host such as Render needs `CLASSPULSE_HOST=0.0.0.0`; it sets `PORT` itself). Equivalent: `python -m uvicorn backend.main:create_app --factory --host 127.0.0.1 --port 8000`. API docs are at http://127.0.0.1:8000/docs.
 
 **Dashboard** (open it and sign in with the account you made; there is no other page before that):
 
@@ -78,6 +78,10 @@ Options: `--no-preview` (no window, stop with Ctrl+C), `--camera-index N`, `--sp
 The worker runs four things at once: a capture thread reads the camera continuously, the preview shows every frame live (about 30 fps) with the latest state drawn on it, scoring samples the newest frame at `worker.target_fps` (10), and finished windows are sent in the background. A slow or stopped backend therefore never freezes the preview; unsent windows wait in the spool and are retried every 5 seconds.
 
 If a window cannot be sent (for example the backend is stopped), the worker appends it to `.spool/unsent.jsonl` and resends everything spooled with the next window and at start-up. Stopping and restarting the backend loses nothing.
+
+## Deploying online
+
+To run the backend, database and dashboard on free hosting (Render, Neon, Streamlit Community Cloud) with the worker staying on your laptop, follow [docs/deploy.md](docs/deploy.md). The pieces have their own requirements files: `requirements-backend.txt`, `dashboard/requirements.txt` and `requirements-worker.txt`; the root `requirements.txt` is all of them plus the test tools, which is what a local setup installs. Hosted settings come from environment variables only (`CLASSPULSE_HOST`, `PORT`, `CLASSPULSE_BACKEND_URL`, `CLASSPULSE_HTTP_TIMEOUT`, see `.env.example`), and `GET /api/health` is the public liveness check.
 
 ## Signing in
 

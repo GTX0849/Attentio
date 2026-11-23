@@ -123,6 +123,12 @@ def create_app(
     app = FastAPI(title="ClassPulse backend", lifespan=lifespan)
     app.include_router(auth_routes.build_router(access, clock))
 
+    @app.get("/api/health")
+    def health() -> dict[str, str]:
+        """Public and free of any database call: the app only starts once the database answered, so
+        an answer here means it is up. For the host's health check and for waking a sleeping service."""
+        return {"status": "ok"}
+
     # ---- records -------------------------------------------------------------
 
     @app.post("/api/records", dependencies=[Depends(access.admin_or_service)])
