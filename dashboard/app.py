@@ -1,4 +1,4 @@
-"""ClassPulse dashboard. Run with: streamlit run dashboard/app.py
+"""Attentio dashboard. Run with: streamlit run dashboard/app.py
 
 Before sign-in the app shows only the sign-in page. After it, the role that comes back from the
 backend decides the view: a student sees their own, a teacher theirs, an admin the overview.
@@ -29,7 +29,7 @@ def render_signed_in(config: Config, identity: Identity) -> None:
     VIEWS[identity.role].render(config)
 
 
-st.set_page_config(page_title="ClassPulse", layout="wide")
+st.set_page_config(page_title="Attentio", layout="wide")
 copy_secrets_to_environ()  # hosted: Streamlit secrets become the settings load_config reads
 _config = load_config()
 _identity = session.current()

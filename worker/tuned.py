@@ -11,7 +11,7 @@ local only and git-ignored, because it holds up to 6000 raw head-angle points fr
 Only labelled tuning (`python -m worker.autotune`, or the end of a `--tune` run) writes these files.
 Lecture learning (worker/front_region.py) never does: it only ever lives in memory.
 
-The file holds `states:` (the three tuned values, same names and meaning as in config/classpulse.yaml)
+The file holds `states:` (the three tuned values, same names and meaning as in config/attentio.yaml)
 and `metadata:` (what the values were made from, for people to read). Only `states:` is used when loading.
 """
 
@@ -123,8 +123,8 @@ def write_tuned(
         "metadata": metadata,
     }
     header = (
-        f"# ClassPulse tuned limits for camera {' '.join(camera_id.split())}, made by python -m worker.autotune.\n"
-        "# Delete this file to go back to the defaults in config/classpulse.yaml. Earlier versions are in history/.\n"
+        f"# Attentio tuned limits for camera {' '.join(camera_id.split())}, made by python -m worker.autotune.\n"
+        "# Delete this file to go back to the defaults in config/attentio.yaml. Earlier versions are in history/.\n"
     )
     path.write_text(header + yaml.safe_dump(document, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path

@@ -45,7 +45,7 @@ from worker.tuning import (
 log = logging.getLogger("worker")
 
 DEFAULT_SPOOL = PROJECT_ROOT / ".spool" / "unsent.jsonl"
-WINDOW_TITLE = "ClassPulse worker (q to quit)"
+WINDOW_TITLE = "Attentio worker (q to quit)"
 LANDMARKS_KEY = "m"  # toggles the landmark overlay in the preview
 STALE_FRAME_S = 1.0  # a frame older than this counts as no frame (camera stalled or unplugged)
 

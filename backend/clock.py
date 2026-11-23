@@ -1,7 +1,7 @@
 """Time helpers: the injectable clock and the configurable local time zone.
 
 The timetable is written in local wall-clock time. Attention records and
-lectures are stored in UTC. The zone comes from the CLASSPULSE_TIMEZONE
+lectures are stored in UTC. The zone comes from the ATTENTIO_TIMEZONE
 environment variable and defaults to Asia/Kolkata.
 """
 
@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from shared.config import PROJECT_ROOT
 
 DEFAULT_TIMEZONE = "Asia/Kolkata"
-TIMEZONE_ENV = "CLASSPULSE_TIMEZONE"
+TIMEZONE_ENV = "ATTENTIO_TIMEZONE"
 
 Clock = Callable[[], datetime]
 
@@ -25,9 +25,9 @@ def system_clock() -> datetime:
 
 
 def resolve_timezone(name: str | None = None) -> ZoneInfo:
-    """The IANA zone for `name`, else CLASSPULSE_TIMEZONE, else Asia/Kolkata."""
+    """The IANA zone for `name`, else ATTENTIO_TIMEZONE, else Asia/Kolkata."""
     if name is None:
-        load_dotenv(PROJECT_ROOT / ".env")  # lets CLASSPULSE_TIMEZONE live in .env; real env vars win
+        load_dotenv(PROJECT_ROOT / ".env")  # lets ATTENTIO_TIMEZONE live in .env; real env vars win
     chosen = name or os.environ.get(TIMEZONE_ENV) or DEFAULT_TIMEZONE
     try:
         return ZoneInfo(chosen)

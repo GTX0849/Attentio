@@ -63,7 +63,7 @@ def test_the_file_has_a_comment_line_the_header_and_one_row_per_tick(tmp_path: P
 
     assert summary.path == tmp_path / "CAM1" / "20270115T080000Z.csv"
     assert lines_of(summary.path) == [
-        "# classpulse tune v1 camera=CAM1",
+        "# attentio tune v1 camera=CAM1",
         "t,label,pitch,yaw,ref_pitch,ref_yaw,rel_pitch,rel_yaw,eyes_closed,face_size_pct,state",
         "1800000000.100,1,4.000,-6.000,1.500,-2.000,2.500,-4.000,0,22.500,attentive",
         "1800000000.200,5,5.000,-7.000,1.500,-2.000,3.500,-5.000,1,22.500,distracted",
@@ -119,7 +119,7 @@ def test_the_camera_id_is_made_safe_for_a_path(tmp_path: Path) -> None:
     assert summary.path is not None
     assert summary.path.parent.parent == tmp_path  # stays inside the tuning folder
     assert summary.path.parent.name == "_Room_4_cam_1"
-    assert "# classpulse tune v1 camera=../Room 4/cam:1" == lines_of(summary.path)[0]
+    assert "# attentio tune v1 camera=../Room 4/cam:1" == lines_of(summary.path)[0]
 
 
 def test_rows_reach_the_disk_about_every_second_and_on_close(tmp_path: Path) -> None:

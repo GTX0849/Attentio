@@ -27,7 +27,7 @@ EMAIL_KEY = "signin_email"
 PASSWORD_KEY = "signin_password"
 FORM_KEY = "signin_form"
 
-TITLE = "Sign in to ClassPulse"
+TITLE = "Sign in to Attentio"
 SUBTITLE = "Use the email and password your department gave you"
 BUTTON = "Sign in"
 FORGOT = "Forgot your password? Your department admin can reset it"
@@ -77,7 +77,7 @@ _CSS = Path(__file__).with_name("signin.css")
 def mark_html() -> str:
     """The wordmark: a blue rounded square with four white bars, then the name."""
     bars = "".join(f'<span style="height:{h}px"></span>' for h in (9, 16, 11, 18))
-    return f'<div class="cp-brand"><div class="cp-mark" aria-hidden="true">{bars}</div><span>ClassPulse</span></div>'
+    return f'<div class="cp-brand"><div class="cp-mark" aria-hidden="true">{bars}</div><span>Attentio</span></div>'
 
 
 def preview_html() -> str:

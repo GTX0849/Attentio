@@ -9,7 +9,7 @@ from worker.runner import DEFAULT_SPOOL, run
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="python -m worker", description="ClassPulse webcam worker")
+    parser = argparse.ArgumentParser(prog="python -m worker", description="Attentio webcam worker")
     parser.add_argument("--student", required=True, help="student register number, e.g. STU001")
     parser.add_argument("--camera", required=True, help="camera id, e.g. CAM1")
     parser.add_argument("--camera-index", type=int, default=0, help="OpenCV webcam index (default 0)")

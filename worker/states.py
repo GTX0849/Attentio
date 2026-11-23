@@ -94,7 +94,7 @@ class StateThresholds:
     def from_config(
         cls, raw: dict[str, Any], camera_id: str | None = None, tuned_dir: Path = TUNED_DIR
     ) -> "StateThresholds":
-        """Read the top-level `states:` section of config/classpulse.yaml.
+        """Read the top-level `states:` section of config/attentio.yaml.
 
         With a `camera_id`, that camera's tuned file (config/tuned/<camera>.yaml, see worker/tuned.py)
         replaces the up limit, side limit and note/phone boundary when it exists. Nothing else changes,

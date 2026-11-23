@@ -17,7 +17,7 @@ def test_a_provider_url_is_pointed_at_the_installed_psycopg_driver(scheme: str) 
 
 
 def test_an_already_normalised_url_is_left_alone() -> None:
-    url = "postgresql+psycopg://postgres@127.0.0.1:55432/classpulse?sslmode=require"
+    url = "postgresql+psycopg://postgres@127.0.0.1:55432/attentio?sslmode=require"
     assert normalise_database_url(url) == url
 
 
@@ -26,12 +26,12 @@ def test_pasted_whitespace_around_the_url_is_dropped() -> None:
 
 
 def test_the_http_timeout_comes_from_the_environment_else_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CLASSPULSE_HTTP_TIMEOUT", raising=False)
+    monkeypatch.delenv("ATTENTIO_HTTP_TIMEOUT", raising=False)
     assert http_timeout(10) == 10
-    monkeypatch.setenv("CLASSPULSE_HTTP_TIMEOUT", "75")
+    monkeypatch.setenv("ATTENTIO_HTTP_TIMEOUT", "75")
     assert http_timeout(10) == 75
     for bad in ("soon", "0", "-5", "nan"):
-        monkeypatch.setenv("CLASSPULSE_HTTP_TIMEOUT", bad)
+        monkeypatch.setenv("ATTENTIO_HTTP_TIMEOUT", bad)
         assert http_timeout(10) == 10
 
 
@@ -39,21 +39,21 @@ def test_the_http_timeout_comes_from_the_environment_else_the_default(monkeypatc
 
 
 def test_the_backend_listens_on_loopback_and_the_configured_port_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("CLASSPULSE_HOST", "PORT", "CLASSPULSE_BACKEND_URL"):
+    for name in ("ATTENTIO_HOST", "PORT", "ATTENTIO_BACKEND_URL"):
         monkeypatch.delenv(name, raising=False)
     host, port = listen_address()
     assert host == "127.0.0.1"
-    assert port == 8000  # the port in config/classpulse.yaml backend.url
+    assert port == 8000  # the port in config/attentio.yaml backend.url
 
 
 def test_the_backend_default_port_follows_the_configured_backend_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PORT", raising=False)
-    monkeypatch.setenv("CLASSPULSE_BACKEND_URL", "http://127.0.0.1:8123")
+    monkeypatch.setenv("ATTENTIO_BACKEND_URL", "http://127.0.0.1:8123")
     assert listen_address()[1] == 8123
 
 
 def test_a_cloud_host_sets_the_address_and_port_through_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CLASSPULSE_HOST", "0.0.0.0")
+    monkeypatch.setenv("ATTENTIO_HOST", "0.0.0.0")
     monkeypatch.setenv("PORT", "10000")
     assert listen_address() == ("0.0.0.0", 10000)
 

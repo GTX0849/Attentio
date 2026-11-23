@@ -2,7 +2,7 @@
 
 import re
 
-DEMO_DOMAIN = "classpulse.test"
+DEMO_DOMAIN = "attentio.test"
 TITLES = {"dr", "prof", "professor", "mr", "mrs", "ms", "miss", "shri", "smt", "sri"}
 
 
@@ -18,10 +18,10 @@ def staff_local_part(name: str) -> str:
 
 
 def staff_email(name: str) -> str:
-    """"Dr. Anita Menon" -> "anita.menon@classpulse.test"."""
+    """"Dr. Anita Menon" -> "anita.menon@attentio.test"."""
     return f"{staff_local_part(name)}@{DEMO_DOMAIN}"
 
 
 def student_email(register_no: str) -> str:
-    """"SIM-A01" -> "sim-a01@classpulse.test"."""
+    """"SIM-A01" -> "sim-a01@attentio.test"."""
     return f"{register_no.strip().lower()}@{DEMO_DOMAIN}"

@@ -1,7 +1,7 @@
 """`python -m backend` runs the API.
 
 Locally it listens on 127.0.0.1 (loopback only), on the port in config `backend.url` (8000).
-A host sets `CLASSPULSE_HOST` and `PORT` instead: Render needs `CLASSPULSE_HOST=0.0.0.0` (it sets
+A host sets `ATTENTIO_HOST` and `PORT` instead: Render needs `ATTENTIO_HOST=0.0.0.0` (it sets
 `PORT` itself), otherwise nothing outside the machine can reach the service.
 """
 
@@ -9,13 +9,13 @@ import uvicorn
 
 from shared.config import env_setting, load_config
 
-HOST_ENV = "CLASSPULSE_HOST"
+HOST_ENV = "ATTENTIO_HOST"
 PORT_ENV = "PORT"
 LOOPBACK = "127.0.0.1"
 
 
 def listen_address() -> tuple[str, int]:
-    """The (host, port) to listen on: CLASSPULSE_HOST (default loopback) and PORT (default: the port in config)."""
+    """The (host, port) to listen on: ATTENTIO_HOST (default loopback) and PORT (default: the port in config)."""
     host = env_setting(HOST_ENV) or LOOPBACK
     raw_port = env_setting(PORT_ENV)
     if raw_port is None:

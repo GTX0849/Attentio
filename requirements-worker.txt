@@ -10,5 +10,5 @@ altair>=5.3  # the tuning charts (python -m worker.autotune)
 # shared/ is imported by the worker:
 pydantic>=2.7,<3  # shared/schema.py
 python-dotenv>=1.0  # shared/config.py reads .env
-pyyaml>=6.0  # shared/config.py reads config/classpulse.yaml
+pyyaml>=6.0  # shared/config.py reads config/attentio.yaml
 tzdata  # IANA time zone data; Windows has none of its own

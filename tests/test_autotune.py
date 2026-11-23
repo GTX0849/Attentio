@@ -56,7 +56,7 @@ def write_run(tuning_dir: Path, camera: str, stamp: str, rows: list[str], versio
     folder = tuning_dir / safe_path_part(camera)
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{stamp}.csv"
-    path.write_text("\n".join([f"# classpulse tune v{version} camera={camera}", HEADER, *rows]) + "\n", encoding="utf-8")
+    path.write_text("\n".join([f"# attentio tune v{version} camera={camera}", HEADER, *rows]) + "\n", encoding="utf-8")
     return path
 
 

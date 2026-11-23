@@ -14,7 +14,7 @@ percentages of its windows. The pieces:
   against the lecture's scheduled length, so time with no record counts as
   not present.
 
-The threshold is `scores.min_presence_ratio` in config/classpulse.yaml.
+The threshold is `scores.min_presence_ratio` in config/attentio.yaml.
 """
 
 from collections.abc import Iterable

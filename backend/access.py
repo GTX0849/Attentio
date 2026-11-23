@@ -4,7 +4,7 @@ A caller is one of:
 
 - a signed-in account (`Authorization: Bearer <token>`), with a role and, for students and teachers,
   the register number or teacher id it is linked to;
-- the service key (`X-ClassPulse-Key`), used by the worker and the simulator;
+- the service key (`X-Attentio-Key`), used by the worker and the simulator;
 - "open", when the app is built with `auth_required=False` (the logic tests). Every check passes.
 
 A missing or unknown token is 401; a valid caller who may not do this is 403. With no service key
@@ -32,7 +32,7 @@ def get_session(request: Request) -> Iterator[Session]:
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
-SERVICE_KEY_HEADER = "X-ClassPulse-Key"
+SERVICE_KEY_HEADER = "X-Attentio-Key"
 SIGN_IN_REQUIRED = "Sign in required"
 NO_ACCESS = "Your account cannot use this"
 

@@ -10,7 +10,7 @@ worker/tuning.py), not just the latest run. To leave a run out, delete or move i
 that cannot be read is skipped with a warning. Rows labelled 0 are ignored. Each file is one
 "run" (one `--tune` session); the number of people is not recorded, so runs are reported, not people.
 
-What it does: with enough data (the minimums are in `tuning:` of config/classpulse.yaml) it works
+What it does: with enough data (the minimums are in `tuning:` of config/attentio.yaml) it works
 out the limits (worker/limits.py), writes `config/tuned/<camera>.yaml` (worker/tuned.py), keeps the
 last few earlier versions, draws `config/tuned/<camera>.html` (a local chart, git-ignored: it holds raw head-angle
 points) and prints a summary. With too little
@@ -50,7 +50,7 @@ from worker.tuning import COLUMNS, DEFAULT_TUNING_DIR, FORMAT_VERSION, LABEL_NAM
 log = logging.getLogger("worker.autotune")
 
 MAX_CHART_POINTS = 6000  # the chart shows at most this many rows (evenly thinned), so the page stays small
-_MAGIC = f"# classpulse tune v{FORMAT_VERSION} camera="
+_MAGIC = f"# attentio tune v{FORMAT_VERSION} camera="
 _COLUMN = {name: i for i, name in enumerate(COLUMNS)}
 
 
@@ -86,8 +86,8 @@ def read_tune_file(path: Path) -> list[TuneRow]:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError) as e:
         raise TuneFileError(f"cannot read it ({e})") from e
-    if not lines or not lines[0].startswith("# classpulse tune"):
-        raise TuneFileError("it does not start with a '# classpulse tune' line")
+    if not lines or not lines[0].startswith("# attentio tune"):
+        raise TuneFileError("it does not start with a '# attentio tune' line")
     if not lines[0].startswith(_MAGIC):
         raise TuneFileError(f"unknown format ({lines[0][:40]!r}); this tool reads v{FORMAT_VERSION}")
     body = [line for line in lines[1:] if line.strip() and not line.startswith("#")]
@@ -337,7 +337,7 @@ def build_chart(rows: Sequence[TuneRow], limits: TunedLimits) -> alt.LayerChart:
 
 
 def load_raw_config() -> dict[str, Any]:
-    """The parsed config/classpulse.yaml (read directly: this tool needs nothing from .env)."""
+    """The parsed config/attentio.yaml (read directly: this tool needs nothing from .env)."""
     with open(CONFIG_PATH, encoding="utf-8") as f:
         raw: dict[str, Any] = yaml.safe_load(f)
     return raw

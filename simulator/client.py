@@ -35,7 +35,7 @@ from simulator.generate import (
 from simulator.timetable import camera_for, room_for, timetable_csv
 
 REQUEST_TIMEOUT_SECONDS = 300
-SERVICE_KEY_HEADER = "X-ClassPulse-Key"
+SERVICE_KEY_HEADER = "X-Attentio-Key"
 
 
 class SimulatorError(Exception):
@@ -67,9 +67,9 @@ class Backend:
             raise SimulatorError(f"Cannot reach the backend at {self._base}: {e}") from e
         if resp.status_code in (401, 403):
             hint = (
-                "the service key is wrong; it must match the backend's CLASSPULSE_SERVICE_KEY"
+                "the service key is wrong; it must match the backend's ATTENTIO_SERVICE_KEY"
                 if self._headers
-                else "set CLASSPULSE_SERVICE_KEY (the same value as the backend's) in .env"
+                else "set ATTENTIO_SERVICE_KEY (the same value as the backend's) in .env"
             )
             raise SimulatorError(f"{method} {path} was refused ({resp.status_code}): {hint}")
         if resp.status_code >= 400:
@@ -87,7 +87,7 @@ class SeedReport:
     marks: int = 0  # marks in them
     accounts: tuple["DemoAccount", ...] = ()  # the simulated accounts that were created
     demo_password: str = field(default="", repr=False)  # their shared password
-    password_generated: bool = False  # true when no CLASSPULSE_DEMO_PASSWORD was set
+    password_generated: bool = False  # true when no ATTENTIO_DEMO_PASSWORD was set
 
 
 @dataclass(frozen=True)
@@ -112,8 +112,8 @@ def seed(
 ) -> SeedReport:
     """Wipe the old simulation, then generate and send a new one ending at `now` (default: now).
 
-    Every simulated student and teacher also gets a simulated account (an email on classpulse.test).
-    They share one password: `demo_password`, else CLASSPULSE_DEMO_PASSWORD, else a random one made
+    Every simulated student and teacher also gets a simulated account (an email on attentio.test).
+    They share one password: `demo_password`, else ATTENTIO_DEMO_PASSWORD, else a random one made
     for this run (returned in the report; the caller shows it once).
     """
     started = time.monotonic()

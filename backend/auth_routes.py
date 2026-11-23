@@ -81,7 +81,7 @@ def build_router(access: Access, clock: Callable[[], datetime]) -> APIRouter:
     @router.get("/api/auth/me")
     def me(session: SessionDep, who: Annotated[Principal, Depends(access.signed_in)]) -> Identity:
         if who.kind == "open":
-            return Identity(role="admin", email="open@classpulse.test", display_name="Open access")
+            return Identity(role="admin", email="open@attentio.test", display_name="Open access")
         return identity_of(session, who)
 
     @router.post("/api/auth/logout", status_code=204)

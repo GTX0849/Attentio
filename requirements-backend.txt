@@ -8,5 +8,5 @@ sqlalchemy>=2.0,<3
 psycopg[binary]>=3.2,<4
 pydantic>=2.7,<3
 python-dotenv>=1.0  # shared/config.py reads .env
-pyyaml>=6.0  # shared/config.py reads config/classpulse.yaml
+pyyaml>=6.0  # shared/config.py reads config/attentio.yaml
 openpyxl>=3.1  # marks upload as .xlsx

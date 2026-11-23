@@ -94,13 +94,13 @@ def create_app(
     """Build the app.
 
     `url` defaults to DATABASE_URL from .env. `timezone` is the IANA zone the
-    timetable is written in (default: CLASSPULSE_TIMEZONE, else Asia/Kolkata).
+    timetable is written in (default: ATTENTIO_TIMEZONE, else Asia/Kolkata).
     `clock` and `window_seconds` exist so tests can control time; the window
-    length defaults to the one in config/classpulse.yaml.
+    length defaults to the one in config/attentio.yaml.
 
     `auth_required` (default True) makes every endpoint check who is calling; see backend/access.py
     and the README. False turns every check into a no-op and exists for the logic tests. `service_key`
-    is the key the worker and simulator send as X-ClassPulse-Key; None reads CLASSPULSE_SERVICE_KEY,
+    is the key the worker and simulator send as X-Attentio-Key; None reads ATTENTIO_SERVICE_KEY,
     and "" means none (then only an admin token passes the machine endpoints).
     """
     tz: ZoneInfo = resolve_timezone(timezone)  # fail at start-up on a bad zone name
@@ -120,7 +120,7 @@ def create_app(
         yield
         engine.dispose()
 
-    app = FastAPI(title="ClassPulse backend", lifespan=lifespan)
+    app = FastAPI(title="Attentio backend", lifespan=lifespan)
     app.include_router(auth_routes.build_router(access, clock))
 
     @app.get("/api/health")
@@ -628,6 +628,6 @@ def _log_sign_in_state(engine: Engine, has_service_key: bool) -> None:
             )
     if not has_service_key:
         log.warning(
-            "CLASSPULSE_SERVICE_KEY is not set: the worker and the simulator cannot send records "
+            "ATTENTIO_SERVICE_KEY is not set: the worker and the simulator cannot send records "
             "unless they use an admin token. Set the same key for the backend and for them (see README)."
         )

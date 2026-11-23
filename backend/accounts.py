@@ -187,7 +187,7 @@ def delete_account(session: Session, account: Account) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m backend.accounts",
-        description="Create and manage ClassPulse accounts. The password is asked for, never given as an option.",
+        description="Create and manage Attentio accounts. The password is asked for, never given as an option.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     create = sub.add_parser("create", help="create an account")

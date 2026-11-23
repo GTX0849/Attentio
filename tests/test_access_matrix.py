@@ -61,7 +61,7 @@ def world(secure_client: TestClient) -> World:
         "teacher1": bearer(sign_in(secure_client, "t1@example.test")["token"]),
         "teacher2": bearer(sign_in(secure_client, "t2@example.test")["token"]),
         "admin": bearer(sign_in(secure_client, "admin@example.test")["token"]),
-        "service": {"X-ClassPulse-Key": SERVICE_KEY},
+        "service": {"X-Attentio-Key": SERVICE_KEY},
         "nobody": {},
     }
     return World(secure_client, headers, teacher1, teacher2, lecture_id, test_id)
@@ -224,16 +224,16 @@ RECORD = {
 
 
 def test_the_service_key_sends_records_and_a_wrong_key_does_not(secure_client: TestClient) -> None:
-    ok = secure_client.post("/api/records", json=[RECORD], headers={"X-ClassPulse-Key": SERVICE_KEY})
+    ok = secure_client.post("/api/records", json=[RECORD], headers={"X-Attentio-Key": SERVICE_KEY})
     assert ok.status_code == 200 and ok.json()["inserted"] == 1
     for wrong in ("wrong-key", SERVICE_KEY + "x", SERVICE_KEY[:-1], ""):
-        resp = secure_client.post("/api/records", json=[RECORD], headers={"X-ClassPulse-Key": wrong})
+        resp = secure_client.post("/api/records", json=[RECORD], headers={"X-Attentio-Key": wrong})
         assert resp.status_code == 401
     assert secure_client.post("/api/records", json=[RECORD]).status_code == 401
 
 
 def test_the_service_key_does_not_open_the_dashboard_endpoints(secure_client: TestClient) -> None:
-    headers = {"X-ClassPulse-Key": SERVICE_KEY}
+    headers = {"X-Attentio-Key": SERVICE_KEY}
     assert secure_client.get("/api/students/STU001/profile", headers=headers).status_code == 403
     assert secure_client.get("/api/admin/overview", headers=headers).status_code == 403
     assert secure_client.get("/api/auth/me", headers=headers).status_code == 403
@@ -243,14 +243,14 @@ def test_the_service_key_creates_only_simulated_student_and_teacher_accounts(wor
     key = world.headers["service"]
     add_student(world.client, "SIM-A01")
     body = {
-        "email": "sim-a01@classpulse.test",
+        "email": "sim-a01@attentio.test",
         "password": "demo-password-123",
         "role": "student",
         "student_register_no": "SIM-A01",
     }
     assert world.client.post("/api/accounts", json=body, headers=key).status_code == 403  # not simulated
     assert world.client.post("/api/accounts", json={**body, "simulated": True}, headers=key).status_code == 201
-    admin = {"email": "sim-admin@classpulse.test", "password": "demo-password-123", "role": "admin", "simulated": True}
+    admin = {"email": "sim-admin@attentio.test", "password": "demo-password-123", "role": "admin", "simulated": True}
     assert world.client.post("/api/accounts", json=admin, headers=key).status_code == 403
     assert world.client.get("/api/accounts", headers=key).status_code == 403
 
@@ -259,7 +259,7 @@ def test_with_no_service_key_configured_only_an_admin_token_passes(
     make_secure_client: ClientFactory, clock: FakeClock
 ) -> None:
     with make_secure_client(service_key="") as client:
-        for header in ({"X-ClassPulse-Key": SERVICE_KEY}, {"X-ClassPulse-Key": ""}):
+        for header in ({"X-Attentio-Key": SERVICE_KEY}, {"X-Attentio-Key": ""}):
             assert client.post("/api/records", json=[RECORD], headers=header).status_code == 401
         add_account(client, "admin@example.test", "admin")
         token = sign_in(client, "admin@example.test")["token"]

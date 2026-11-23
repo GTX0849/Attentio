@@ -1,10 +1,10 @@
-# ClassPulse: Classroom Design Document
+# Attentio: Classroom Design Document
 
 Ticket: CLA-7
 
 ## 1. Purpose and scope
 
-ClassPulse measures how attentive each student is during a lecture. A camera worker classifies each student's attention state, a FastAPI backend stores 30-second records in PostgreSQL, and a Streamlit dashboard reports to students, teachers and administrators.
+Attentio measures how attentive each student is during a lecture. A camera worker classifies each student's attention state, a FastAPI backend stores 30-second records in PostgreSQL, and a Streamlit dashboard reports to students, teachers and administrators.
 
 This week's deliverable is a webcam prototype: one face, a fixed student ID, no face recognition and no logins. This document explains how the prototype extends to a real classroom. It also lists the deferred features and the limits of what the system can claim. The prototype has been tested only by acting out cases in front of a webcam. The classroom design below has not been built or tested, and nothing here is a result.
 
@@ -160,7 +160,7 @@ These are outside the first classroom version.
 ## 11. Limits
 
 - **Attention measures engagement, not understanding.** A student facing the board may be lost, and one looking down may be taking notes. That is why test marks are used for understanding.
-- **Reading emotion from faces has weak scientific support.** ClassPulse does not attempt it. It uses head direction, closed eyes and face presence only.
+- **Reading emotion from faces has weak scientific support.** Attentio does not attempt it. It uses head direction, closed eyes and face presence only.
 - **The slot-adjusted teacher figure cannot separate a teacher from a slot they always teach in.** If a teacher always teaches at 2 pm, the slot effect and the teaching effect cannot be told apart.
 - **Tests are infrequent.** Two or three tests per subject give an indication, not proof.
 - **Results are feedback, not a ranking**, and should not be used to punish. Teacher figures need at least 5 lectures and carry a 95% range.

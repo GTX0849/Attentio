@@ -69,7 +69,7 @@ class TuningConfig:
 
     @classmethod
     def from_config(cls, raw: dict[str, Any]) -> "TuningConfig":
-        """Read the top-level `tuning:` section of config/classpulse.yaml."""
+        """Read the top-level `tuning:` section of config/attentio.yaml."""
         section = raw["tuning"]
         values: dict[str, Any] = {name: float(section[name]) for name in cls.__dataclass_fields__}
         values["history_keep"] = int(section["history_keep"])

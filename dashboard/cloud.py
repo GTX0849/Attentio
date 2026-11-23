@@ -10,7 +10,7 @@ import streamlit as st
 def copy_secrets_to_environ(secrets: Mapping[str, Any] | None = None, environ: MutableMapping[str, str] | None = None) -> None:
     """Copy root-level string secrets into `environ` (default `os.environ`) when not already set there.
 
-    `shared.config` reads its settings (CLASSPULSE_BACKEND_URL, CLASSPULSE_HTTP_TIMEOUT) from the
+    `shared.config` reads its settings (ATTENTIO_BACKEND_URL, ATTENTIO_HTTP_TIMEOUT) from the
     environment, so this is what lets the same code run locally from `.env` and hosted from secrets.
     Sections (tables) and non-strings are skipped. With no secrets file, `st.secrets` raises; that is
     not an error here. Values are never printed.

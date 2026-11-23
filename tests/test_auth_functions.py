@@ -80,5 +80,5 @@ def test_staff_local_parts_drop_titles_and_join_first_and_last_name() -> None:
 
 
 def test_demo_emails_are_on_the_reserved_test_domain() -> None:
-    assert staff_email("Dr. Anita Menon") == "anita.menon@classpulse.test"
-    assert student_email("SIM-A01") == "sim-a01@classpulse.test"
+    assert staff_email("Dr. Anita Menon") == "anita.menon@attentio.test"
+    assert student_email("SIM-A01") == "sim-a01@attentio.test"

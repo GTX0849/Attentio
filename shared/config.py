@@ -10,7 +10,7 @@ import yaml
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = PROJECT_ROOT / "config" / "classpulse.yaml"
+CONFIG_PATH = PROJECT_ROOT / "config" / "attentio.yaml"
 
 
 @dataclass(frozen=True)
@@ -23,11 +23,11 @@ class Config:
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
-BACKEND_URL_ENV = "CLASSPULSE_BACKEND_URL"
+BACKEND_URL_ENV = "ATTENTIO_BACKEND_URL"
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:
-    """The shared config. CLASSPULSE_BACKEND_URL, when set, replaces `backend.url`."""
+    """The shared config. ATTENTIO_BACKEND_URL, when set, replaces `backend.url`."""
     with open(path, encoding="utf-8") as f:
         raw: dict[str, Any] = yaml.safe_load(f)
     backend_url = _env(BACKEND_URL_ENV) or str(raw["backend"]["url"])
@@ -83,11 +83,11 @@ def test_database_url() -> str | None:
     return normalise_database_url(url) if url else None
 
 
-HTTP_TIMEOUT_ENV = "CLASSPULSE_HTTP_TIMEOUT"
+HTTP_TIMEOUT_ENV = "ATTENTIO_HTTP_TIMEOUT"
 
 
 def http_timeout(default: float) -> float:
-    """Seconds to wait for the backend: CLASSPULSE_HTTP_TIMEOUT when it is a positive number, else `default`.
+    """Seconds to wait for the backend: ATTENTIO_HTTP_TIMEOUT when it is a positive number, else `default`.
 
     A free host sleeps when idle and takes up to a minute to wake, so a hosted dashboard sets about 75.
     """
@@ -101,12 +101,12 @@ def http_timeout(default: float) -> float:
     return seconds if math.isfinite(seconds) and seconds > 0 else default
 
 
-SERVICE_KEY_ENV = "CLASSPULSE_SERVICE_KEY"
-DEMO_PASSWORD_ENV = "CLASSPULSE_DEMO_PASSWORD"
+SERVICE_KEY_ENV = "ATTENTIO_SERVICE_KEY"
+DEMO_PASSWORD_ENV = "ATTENTIO_DEMO_PASSWORD"
 
 
 def service_key() -> str | None:
-    """The key the worker and the simulator send in `X-ClassPulse-Key`. None when not configured:
+    """The key the worker and the simulator send in `X-Attentio-Key`. None when not configured:
     there is no default, so the machine endpoints then accept only an admin token."""
     return _env(SERVICE_KEY_ENV)
 

@@ -6,18 +6,18 @@ from shared.config import http_timeout
 from shared.schema import AttentionRecord
 from worker.delivery import SendError
 
-SERVICE_KEY_HEADER = "X-ClassPulse-Key"
+SERVICE_KEY_HEADER = "X-Attentio-Key"
 NO_KEY_MESSAGE = (
-    "CLASSPULSE_SERVICE_KEY is not set, so the backend will refuse these records. Put the same "
+    "ATTENTIO_SERVICE_KEY is not set, so the backend will refuse these records. Put the same "
     "key in .env for the backend and the worker (see Signing in in the README). Records stay in the "
     "spool until it is set."
 )
 
 
 class HttpSender:
-    """Posts windows to `/api/records`, with the service key in `X-ClassPulse-Key` when there is one.
+    """Posts windows to `/api/records`, with the service key in `X-Attentio-Key` when there is one.
 
-    `timeout` defaults to 3 s, or CLASSPULSE_HTTP_TIMEOUT when set. Keep it short: a send that times out
+    `timeout` defaults to 3 s, or ATTENTIO_HTTP_TIMEOUT when set. Keep it short: a send that times out
     (a sleeping free host, say) leaves the records in the spool, which retries them.
     """
 

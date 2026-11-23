@@ -126,7 +126,7 @@ class PerceptionSettings:
 
     @classmethod
     def from_config(cls, raw: dict[str, Any]) -> "PerceptionSettings":
-        """Read the top-level `perception:` section of config/classpulse.yaml."""
+        """Read the top-level `perception:` section of config/attentio.yaml."""
         s = raw["perception"]
         key = str(s["recalibrate_key"])
         if len(key) != 1:

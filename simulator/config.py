@@ -1,4 +1,4 @@
-"""The `simulator:` section of config/classpulse.yaml as a typed object."""
+"""The `simulator:` section of config/attentio.yaml as a typed object."""
 
 from dataclasses import dataclass
 from typing import Any

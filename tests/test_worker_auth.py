@@ -38,11 +38,11 @@ def fake_post(monkeypatch: pytest.MonkeyPatch, status: int) -> list[dict[str, An
     return seen
 
 
-def test_the_key_goes_in_the_x_classpulse_key_header(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_key_goes_in_the_x_attentio_key_header(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = fake_post(monkeypatch, 200)
     HttpSender("http://backend:8000/", service_key="the-key").send([RECORD])
     assert seen[0]["url"] == "http://backend:8000/api/records"
-    assert seen[0]["headers"] == {"X-ClassPulse-Key": "the-key"}
+    assert seen[0]["headers"] == {"X-Attentio-Key": "the-key"}
 
 
 def test_without_a_key_no_header_is_sent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,7 +56,7 @@ def test_a_refused_key_is_not_permanent_and_says_what_to_do(monkeypatch: pytest.
     fake_post(monkeypatch, status)
     with pytest.raises(SendError) as missing:
         HttpSender("http://b").send([RECORD])
-    assert not missing.value.permanent and "CLASSPULSE_SERVICE_KEY is not set" in str(missing.value)
+    assert not missing.value.permanent and "ATTENTIO_SERVICE_KEY is not set" in str(missing.value)
     with pytest.raises(SendError) as wrong:
         HttpSender("http://b", service_key="k").send([RECORD])
     assert not wrong.value.permanent and "service key is wrong" in str(wrong.value)
@@ -72,9 +72,9 @@ def test_a_rejected_record_is_still_permanent(monkeypatch: pytest.MonkeyPatch) -
 
 def test_the_sender_waits_three_seconds_unless_the_timeout_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = fake_post(monkeypatch, 200)
-    monkeypatch.delenv("CLASSPULSE_HTTP_TIMEOUT", raising=False)
+    monkeypatch.delenv("ATTENTIO_HTTP_TIMEOUT", raising=False)
     HttpSender("http://b").send([RECORD])
-    monkeypatch.setenv("CLASSPULSE_HTTP_TIMEOUT", "20")
+    monkeypatch.setenv("ATTENTIO_HTTP_TIMEOUT", "20")
     HttpSender("http://b").send([RECORD])
     HttpSender("http://b", timeout=1.5).send([RECORD])  # an explicit timeout always wins
     assert [call["timeout"] for call in seen] == [3.0, 20.0, 1.5]

@@ -49,21 +49,21 @@ class MissingSecrets(Mapping[str, Any]):
 def test_root_level_string_secrets_are_copied_into_the_environment() -> None:
     environ: dict[str, str] = {}
     copy_secrets_to_environ(
-        FakeSecrets({"CLASSPULSE_BACKEND_URL": "https://cp.example.test", "CLASSPULSE_HTTP_TIMEOUT": "75"}), environ
+        FakeSecrets({"ATTENTIO_BACKEND_URL": "https://cp.example.test", "ATTENTIO_HTTP_TIMEOUT": "75"}), environ
     )
-    assert environ == {"CLASSPULSE_BACKEND_URL": "https://cp.example.test", "CLASSPULSE_HTTP_TIMEOUT": "75"}
+    assert environ == {"ATTENTIO_BACKEND_URL": "https://cp.example.test", "ATTENTIO_HTTP_TIMEOUT": "75"}
 
 
 def test_a_setting_that_is_already_in_the_environment_wins() -> None:
-    environ = {"CLASSPULSE_BACKEND_URL": "http://127.0.0.1:8000"}
-    copy_secrets_to_environ(FakeSecrets({"CLASSPULSE_BACKEND_URL": "https://cp.example.test"}), environ)
-    assert environ == {"CLASSPULSE_BACKEND_URL": "http://127.0.0.1:8000"}
+    environ = {"ATTENTIO_BACKEND_URL": "http://127.0.0.1:8000"}
+    copy_secrets_to_environ(FakeSecrets({"ATTENTIO_BACKEND_URL": "https://cp.example.test"}), environ)
+    assert environ == {"ATTENTIO_BACKEND_URL": "http://127.0.0.1:8000"}
 
 
 def test_only_root_level_strings_are_copied_not_sections_or_numbers() -> None:
     environ: dict[str, str] = {}
     copy_secrets_to_environ(
-        FakeSecrets({"section": {"CLASSPULSE_BACKEND_URL": "x"}, "retries": 3, "NAME": "kept"}), environ
+        FakeSecrets({"section": {"ATTENTIO_BACKEND_URL": "x"}, "retries": 3, "NAME": "kept"}), environ
     )
     assert environ == {"NAME": "kept"}
 
@@ -85,10 +85,10 @@ def test_the_dashboard_waits_ten_seconds_unless_told_otherwise(monkeypatch: pyte
         raise requests.Timeout("slow")
 
     monkeypatch.setattr(requests, "request", request)
-    monkeypatch.delenv("CLASSPULSE_HTTP_TIMEOUT", raising=False)
+    monkeypatch.delenv("ATTENTIO_HTTP_TIMEOUT", raising=False)
     with pytest.raises(api.BackendError):
         api.list_rooms("http://b")
-    monkeypatch.setenv("CLASSPULSE_HTTP_TIMEOUT", "75")
+    monkeypatch.setenv("ATTENTIO_HTTP_TIMEOUT", "75")
     with pytest.raises(api.BackendError):
         api.list_rooms("http://b")
     assert waited == [10, 75]
@@ -102,7 +102,7 @@ def test_a_sign_in_waits_as_long_as_the_configured_timeout(monkeypatch: pytest.M
         raise requests.Timeout("slow")
 
     monkeypatch.setattr(requests, "post", post)
-    monkeypatch.setenv("CLASSPULSE_HTTP_TIMEOUT", "75")
+    monkeypatch.setenv("ATTENTIO_HTTP_TIMEOUT", "75")
     with pytest.raises(api.SignInError):
         api.login("http://b", "a@x.test", "pw")
     assert waited == [75]
@@ -124,8 +124,8 @@ def test_a_backend_that_is_asleep_gets_a_plain_message_in_the_view(
 
 
 def test_the_app_takes_its_backend_address_from_streamlit_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CLASSPULSE_BACKEND_URL", "placeholder")
-    monkeypatch.delenv("CLASSPULSE_BACKEND_URL")  # unset now, and put back (unset) when the test ends
+    monkeypatch.setenv("ATTENTIO_BACKEND_URL", "placeholder")
+    monkeypatch.delenv("ATTENTIO_BACKEND_URL")  # unset now, and put back (unset) when the test ends
     tried: list[str] = []
 
     def login(url: str, email: str, password: str) -> dict[str, Any]:
@@ -134,7 +134,7 @@ def test_the_app_takes_its_backend_address_from_streamlit_secrets(monkeypatch: p
 
     monkeypatch.setattr(api, "login", login)
     at = AppTest.from_file(APP, default_timeout=20)
-    at.secrets["CLASSPULSE_BACKEND_URL"] = "https://cp.example.test/"
+    at.secrets["ATTENTIO_BACKEND_URL"] = "https://cp.example.test/"
     at.run()
     at.text_input(key=signin.EMAIL_KEY).input("a@example.edu")
     at.text_input(key=signin.PASSWORD_KEY).input("whatever-1")

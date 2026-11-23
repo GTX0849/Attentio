@@ -1,8 +1,10 @@
-# ClassPulse
+# Attentio
+
+(Formerly ClassPulse. Environment variables now start with `ATTENTIO_`, the config file is `config/attentio.yaml`, and the service-key header is `X-Attentio-Key`; the old names no longer work.)
 
 A laptop webcam worker classifies the person in view into attention states and sends one record per student per 30-second window to a FastAPI backend (PostgreSQL). A Streamlit dashboard reads only from the backend over HTTP. People sign in with an email and a password, and the backend decides what each role may read (see Signing in).
 
-The worker decides states with the rules in the `states:` section of `config/classpulse.yaml` (eyes-closed grace, look-down allowance, pitch and yaw bands, and the learned front region). It feeds those rules with real readings from MediaPipe (head pitch and yaw, eyes closed, shoulders in view); see Real readings below.
+The worker decides states with the rules in the `states:` section of `config/attentio.yaml` (eyes-closed grace, look-down allowance, pitch and yaw bands, and the learned front region). It feeds those rules with real readings from MediaPipe (head pitch and yaw, eyes closed, shoulders in view); see Real readings below.
 
 ## Layout
 
@@ -17,7 +19,7 @@ The worker decides states with the rules in the `states:` section of `config/cla
 | `simulator/` | Simulated classroom history: cohort, timetable and records generated and sent through the backend API (see Simulator) |
 | `config/tuned/` | Per-camera tuned limits and charts made by `python -m worker.autotune` (the small limits files are committed and shared; the charts stay local; see Tuning the limits) |
 | `tests/` | pytest suite |
-| `config/classpulse.yaml` | The one shared config file (fps, window length, backend URL, refresh, the marks attention line, simulator sizes and effects) |
+| `config/attentio.yaml` | The one shared config file (fps, window length, backend URL, refresh, the marks attention line, simulator sizes and effects) |
 
 ## Setup (Windows)
 
@@ -33,11 +35,13 @@ copy .env.example .env
 Edit `.env` and put your own PostgreSQL password in both URLs:
 
 ```
-DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/classpulse
-TEST_DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/classpulse_test
+DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/attentio
+TEST_DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/attentio_test
 ```
 
-Also put a long random value in `.env` as `CLASSPULSE_SERVICE_KEY` (used by the worker and the simulator, see Signing in), for example the output of `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+The local databases were renamed in these docs only (`attentio` and `attentio_test`; nothing was renamed or dropped in PostgreSQL). An existing `classpulse` database still works if `DATABASE_URL` points at it.
+
+Also put a long random value in `.env` as `ATTENTIO_SERVICE_KEY` (used by the worker and the simulator, see Signing in), for example the output of `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
 You do not need to create the databases. When the backend (or the tests) start, the database in the URL is used if it exists; if it is missing it is created by connecting to the server's `postgres` database with the same credentials (a hosted database such as Neon's must already exist, and is used as it is). Tables are created automatically and the demo data is seeded: room `R101`, camera `CAM1`, student `STU001`. `.env` is git-ignored; never commit it.
 
@@ -53,13 +57,13 @@ It asks for the password twice. The rest of the accounts are in Signing in.
 
 Use three terminals, each with the venv active, in the project root.
 
-**Backend** (binds to 127.0.0.1:8000 only unless `CLASSPULSE_HOST` says otherwise):
+**Backend** (binds to 127.0.0.1:8000 only unless `ATTENTIO_HOST` says otherwise):
 
 ```powershell
 python -m backend
 ```
 
-Set `CLASSPULSE_HOST` and `PORT` to listen elsewhere (a host such as Render needs `CLASSPULSE_HOST=0.0.0.0`; it sets `PORT` itself). Equivalent: `python -m uvicorn backend.main:create_app --factory --host 127.0.0.1 --port 8000`. API docs are at http://127.0.0.1:8000/docs.
+Set `ATTENTIO_HOST` and `PORT` to listen elsewhere (a host such as Render needs `ATTENTIO_HOST=0.0.0.0`; it sets `PORT` itself). Equivalent: `python -m uvicorn backend.main:create_app --factory --host 127.0.0.1 --port 8000`. API docs are at http://127.0.0.1:8000/docs.
 
 **Dashboard** (open it and sign in with the account you made; there is no other page before that):
 
@@ -67,7 +71,7 @@ Set `CLASSPULSE_HOST` and `PORT` to listen elsewhere (a host such as Render need
 streamlit run dashboard/app.py
 ```
 
-**Worker** (needs a webcam and `CLASSPULSE_SERVICE_KEY` in `.env`, the same value the backend reads; press `q` in the preview window or Ctrl+C to stop):
+**Worker** (needs a webcam and `ATTENTIO_SERVICE_KEY` in `.env`, the same value the backend reads; press `q` in the preview window or Ctrl+C to stop):
 
 ```powershell
 python -m worker --student STU001 --camera CAM1
@@ -81,13 +85,13 @@ If a window cannot be sent (for example the backend is stopped), the worker appe
 
 ## Deploying online
 
-To run the backend, database and dashboard on free hosting (Render, Neon, Streamlit Community Cloud) with the worker staying on your laptop, follow [docs/deploy.md](docs/deploy.md). The pieces have their own requirements files: `requirements-backend.txt`, `dashboard/requirements.txt` and `requirements-worker.txt`; the root `requirements.txt` is all of them plus the test tools, which is what a local setup installs. Hosted settings come from environment variables only (`CLASSPULSE_HOST`, `PORT`, `CLASSPULSE_BACKEND_URL`, `CLASSPULSE_HTTP_TIMEOUT`, see `.env.example`), and `GET /api/health` is the public liveness check.
+To run the backend, database and dashboard on free hosting (Render, Neon, Streamlit Community Cloud) with the worker staying on your laptop, follow [docs/deploy.md](docs/deploy.md). The pieces have their own requirements files: `requirements-backend.txt`, `dashboard/requirements.txt` and `requirements-worker.txt`; the root `requirements.txt` is all of them plus the test tools, which is what a local setup installs. Hosted settings come from environment variables only (`ATTENTIO_HOST`, `PORT`, `ATTENTIO_BACKEND_URL`, `ATTENTIO_HTTP_TIMEOUT`, see `.env.example`), and `GET /api/health` is the public liveness check.
 
 ## Signing in
 
 One sign-in page serves everyone: an email and a password. The role (student, teacher or admin) comes from the account, and the person lands in their own view. The role is checked by the backend on every request, not only by the dashboard, so another front end would get the same limits.
 
-**Accounts.** An account has an email (stored lower-cased, unique ignoring case), a role, a password and a link: a student account to one register number, a teacher account to one teacher (the names the timetable upload created), an admin account to nothing. Passwords are hashed with scrypt and a random salt per account (standard library only) and compared in constant time; there is no password in the database, the logs or any response. Session tokens are random, only a SHA-256 of each is stored, and they expire after `auth.session_hours` (12) in `config/classpulse.yaml`.
+**Accounts.** An account has an email (stored lower-cased, unique ignoring case), a role, a password and a link: a student account to one register number, a teacher account to one teacher (the names the timetable upload created), an admin account to nothing. Passwords are hashed with scrypt and a random salt per account (standard library only) and compared in constant time; there is no password in the database, the logs or any response. Session tokens are random, only a SHA-256 of each is stored, and they expire after `auth.session_hours` (12) in `config/attentio.yaml`.
 
 **Create accounts** with the command line, which reads `DATABASE_URL` like the backend and asks for the password twice (a password is never an argument):
 
@@ -104,9 +108,9 @@ A student's register number must already exist (the worker or the simulator regi
 
 **Sign-in limits.** A wrong email or password always gives the same message ("Email or password is incorrect"), so it does not show which emails exist. After 5 failed attempts for one email inside 5 minutes (`auth.login_max_failures`, `auth.login_window_minutes`) the backend answers 429 for that email until the window has passed. The count is kept in the backend's memory. The dashboard keeps the token in the browser session's server-side state and never in the URL; reloading the page signs you out, and a session that ended shows "Your session ended. Sign in again".
 
-**The service key.** The worker and the simulator are not people. They send `X-ClassPulse-Key: <CLASSPULSE_SERVICE_KEY>`, and the backend compares it in constant time. Put the same value in `.env` for the backend, the worker and the simulator. There is no default key: with none set, the machine endpoints accept only an admin token, the backend logs that at start-up, the worker logs a clear message and keeps its records in the spool, and the simulator stops with a message. The key opens only the machine endpoints below (and, for the simulator, creating simulated student and teacher accounts); it never opens a student's or teacher's view or the admin overview.
+**The service key.** The worker and the simulator are not people. They send `X-Attentio-Key: <ATTENTIO_SERVICE_KEY>`, and the backend compares it in constant time. Put the same value in `.env` for the backend, the worker and the simulator. There is no default key: with none set, the machine endpoints accept only an admin token, the backend logs that at start-up, the worker logs a clear message and keeps its records in the spool, and the simulator stops with a message. The key opens only the machine endpoints below (and, for the simulator, creating simulated student and teacher accounts); it never opens a student's or teacher's view or the admin overview.
 
-**Simulated demo accounts.** `python -m simulator seed` also creates a simulated account for every simulated teacher and student, on the reserved `classpulse.test` domain: `anita.menon@classpulse.test` for Dr. Anita Menon (first and last name, titles dropped) and `sim-a01@classpulse.test` for `SIM-A01`. They share one password: `CLASSPULSE_DEMO_PASSWORD` if set in `.env`, otherwise a random one made for each run. A generated password is printed once at the end of the run and written, with the emails, to the git-ignored `.spool/demo-credentials.txt`; no password is in the repository. `python -m simulator wipe` removes the accounts with the rest of the simulation.
+**Simulated demo accounts.** `python -m simulator seed` also creates a simulated account for every simulated teacher and student, on the reserved `attentio.test` domain: `anita.menon@attentio.test` for Dr. Anita Menon (first and last name, titles dropped) and `sim-a01@attentio.test` for `SIM-A01`. They share one password: `ATTENTIO_DEMO_PASSWORD` if set in `.env`, otherwise a random one made for each run. A generated password is printed once at the end of the run and written, with the emails, to the git-ignored `.spool/demo-credentials.txt`; no password is in the repository. `python -m simulator wipe` removes the accounts with the rest of the simulation.
 
 **What each role can see.**
 
@@ -154,7 +158,7 @@ This fetches only the official MediaPipe `face_landmarker` and `pose_landmarker_
 
 The white line under the message says what is wrong and what is needed, for example "Calibration paused - head moving +/-3.8 deg, needs under +/-2.0 deg for 3 s", "face is 8% of the picture width, needs 12%", "62% of your face is in the picture, needs 98%" or "your face is only 1.4x the area of the nearest other face, needs 2.0x". When everything holds it shows "Calibrating" with "Look at the teacher and hold still - 2.1 s left". If nobody is in view there is nothing to check and calibration waits for a face as before. The check is never run after calibration has finished: during the lecture a small, cut-off or fidgety face is scored normally and only the readout line shows it.
 
-**The front region (state rules).** A student counts as Attentive while facing the front of the room in any natural way: looking up at a standing teacher, turning toward one who walks across the room, slouching, leaning, sitting up. Out of the box (the `states:` section of `config/classpulse.yaml`) Attentive runs from 30 degrees up (pitch -30) to 15 degrees down (pitch +15), and up to 35 degrees to either side (|yaw| at most 35). Looking further up or further sideways is Distracted, as is a long look down, turning well to the side or back, and closed eyes. These angles are measured from a *reference direction*, not from calibration alone:
+**The front region (state rules).** A student counts as Attentive while facing the front of the room in any natural way: looking up at a standing teacher, turning toward one who walks across the room, slouching, leaning, sitting up. Out of the box (the `states:` section of `config/attentio.yaml`) Attentive runs from 30 degrees up (pitch -30) to 15 degrees down (pitch +15), and up to 35 degrees to either side (|yaw| at most 35). Looking further up or further sideways is Distracted, as is a long look down, turning well to the side or back, and closed eyes. These angles are measured from a *reference direction*, not from calibration alone:
 
 - **Moving reference.** The median of head pitch and yaw over the last 120 s, learned all through the lecture, only from readings already inside the current front region (Attentive) and only while the face is present. It is capped at 15 degrees of pitch and 20 degrees of yaw from calibration, so it can follow a slow posture shift but never wander far. Effective pitch is pitch minus the reference pitch, and likewise for yaw.
 - **Personal spread.** How much the head varies around the reference while Attentive: the 90th percentile (nearest rank) of the absolute effective angle, kept separately for pitch and yaw. It sets this student's extents: up extent = k x pitch spread, sideways extent = k x yaw spread, with k = 2.5. A fidgety student gets wider extents, a still one tighter, but always within a range anchored on the camera's limit: each student's range can tighten to 15 degrees or widen to 10 degrees beyond the camera's limit (`min_up_extent_deg`, `min_side_extent_deg`, `extent_headroom_deg`). The camera's limit is the tuned one when the camera has a tuned file (see "Tuning the limits") and the default above (30 up, 35 sideways) otherwise, so with the defaults the extents stay between 15 and 40 degrees (up) or 15 and 45 degrees (sideways), and a camera tuned to 25 up and 45 sideways gives 15 to 35 and 15 to 55. Tuning therefore bounds every student's learned range for the whole lecture, not just the first 30 s. Until 30 s of Attentive data are in the window, nothing is learned: the reference stays at calibration and the extents are the camera's limits.
@@ -163,9 +167,9 @@ The white line under the message says what is wrong and what is needed, for exam
 - **Limits.** A sudden, permanent jump of the head beyond the student's extents (a 20 degree change of posture in one move) is not learned, because those readings are not Attentive; only gradual shifts are followed. Recalibration (`reset_learning()`) clears the reference and extents.
 - **Storage.** The learned profile lives in memory (`worker/front_region.py`, behind the `FrontRegionProfile` interface) and is discarded at the end of the session. Nothing is written to disk, and it never changes a camera's tuned limits (only labelled tuning does, see "Tuning the limits"). A persistent store may be added once consent and retention are designed.
 
-Every number is in `states:` and `states.learning:` of `config/classpulse.yaml` (window, caps, k, minimum extents, headroom, data needed).
+Every number is in `states:` and `states.learning:` of `config/attentio.yaml` (window, caps, k, minimum extents, headroom, data needed).
 
-**Sign flags.** Positive pitch must mean looking down, and the preview shows the value live. The signs were derived from the matrix maths and the live check showed sensible magnitudes, but a human pose could not be judged. If looking down shows a negative pitch, set `perception.invert_pitch: true` in `config/classpulse.yaml`. `invert_yaw` flips yaw; only its absolute value is used by the rules, so it is mostly cosmetic.
+**Sign flags.** Positive pitch must mean looking down, and the preview shows the value live. The signs were derived from the matrix maths and the live check showed sensible magnitudes, but a human pose could not be judged. If looking down shows a negative pitch, set `perception.invert_pitch: true` in `config/attentio.yaml`. `invert_yaw` flips yaw; only its absolute value is used by the rules, so it is mostly cosmetic.
 
 **Several people in view.** The models look for up to `perception.max_faces` faces and `perception.max_poses` bodies per frame (both default 5; they are maximums, and each extra person costs processing time, so lower them on a slow machine). Only one person is scored, and the choice is made like this:
 
@@ -214,7 +218,7 @@ The worker runs as usual (scoring, preview, records sent to the backend and the 
 
 The preview shows a yellow "TUNE" chip under the state banner with the current label (for example "1 - Watching the teacher"), and the label keys on the left of the key hints bar. Without `--tune` the number keys do nothing and none of this is drawn. Tune mode needs the MediaPipe detector and the preview (without the preview there are no keys and every row gets label 0).
 
-**What is saved.** Each run writes its own CSV file, `.spool/tuning/<camera id>/<UTC timestamp>.csv` (git-ignored; odd characters in the camera id become `_`). It has one row per scoring tick (about 10 a second), only while a face is locked and in view and calibration has finished, so there are no rows during calibration or when nobody is in view. The first line is `# classpulse tune v1 camera=<id>`, the second is the header, and the columns are `t` (epoch seconds), `label` (0 to 5), `pitch` and `yaw` (relative to calibration), `ref_pitch` and `ref_yaw` (the learned reference at that moment), `rel_pitch` and `rel_yaw` (pitch and yaw minus the reference), `eyes_closed` (0 or 1), `face_size_pct` and `state`. No names, student ids, images or other faces are saved, and the records sent to the backend are not changed. The full format is in the docstring of `worker/tuning.py`.
+**What is saved.** Each run writes its own CSV file, `.spool/tuning/<camera id>/<UTC timestamp>.csv` (git-ignored; odd characters in the camera id become `_`). It has one row per scoring tick (about 10 a second), only while a face is locked and in view and calibration has finished, so there are no rows during calibration or when nobody is in view. The first line is `# attentio tune v1 camera=<id>`, the second is the header, and the columns are `t` (epoch seconds), `label` (0 to 5), `pitch` and `yaw` (relative to calibration), `ref_pitch` and `ref_yaw` (the learned reference at that moment), `rel_pitch` and `rel_yaw` (pitch and yaw minus the reference), `eyes_closed` (0 or 1), `face_size_pct` and `state`. No names, student ids, images or other faces are saved, and the records sent to the backend are not changed. The full format is in the docstring of `worker/tuning.py`.
 
 The file is written in small buffered steps (flushed about once a second and on exit), so it never slows the preview. When you quit with `q` or Ctrl+C the worker prints the file path and the number of rows per label, then tunes the camera from all its files (see "Tuning the limits" below). Delete or move the files of runs you do not want counted.
 
@@ -229,7 +233,7 @@ python -m worker.autotune CAM1 --dry-run    # show the suggested limits and writ
 
 **What it reads.** All the tune files of that camera in `.spool/tuning/<camera id>/`, not just the latest run. To leave a run out, delete or move its file. A file that cannot be read (damaged, or another format version) is skipped with a warning. Rows labelled 0 are ignored. Each file counts as one run (one `--tune` session); the number of people is not recorded, so the summary reports runs, not people.
 
-**Minimum data.** Time is added up from the row timestamps, ignoring gaps over 2 s. At least 60 s of label 1 (watching the teacher), 30 s of label 2 (taking notes) and 30 s of label 3 (phone in lap) are needed. Below that nothing is changed and the summary says what is missing, for example "needs 22 s more of taking notes". The amounts are in the `tuning:` section of `config/classpulse.yaml`.
+**Minimum data.** Time is added up from the row timestamps, ignoring gaps over 2 s. At least 60 s of label 1 (watching the teacher), 30 s of label 2 (taking notes) and 30 s of label 3 (phone in lap) are needed. Below that nothing is changed and the summary says what is missing, for example "needs 22 s more of taking notes". The amounts are in the `tuning:` section of `config/attentio.yaml`.
 
 **What is tuned.** Pitch and yaw are the angles relative to the learned reference (`rel_pitch`, `rel_yaw`), as the state rules use them.
 
@@ -258,7 +262,7 @@ Every attention record is tied to a lecture: a teacher, a subject, a section and
 
 **A new upload replaces the template of its own kind.** A normal upload replaces only the live (non-simulated) slots; an upload with `simulated=true` (what the simulator sends) replaces only the simulated ones, so the live timetable is never wiped by the simulator and the other way round. Slots that are identical to ones already stored are kept, so uploading the same file again changes nothing. Lectures already created keep working after a replace, because each lecture holds its own copy of room, teacher, subject and section.
 
-**Time zone.** Timetable times are local wall-clock time in the zone named by the `CLASSPULSE_TIMEZONE` environment variable (default `Asia/Kolkata`, can go in `.env`). Records and lectures are stored in UTC, and the backend converts, including daylight saving.
+**Time zone.** Timetable times are local wall-clock time in the zone named by the `ATTENTIO_TIMEZONE` environment variable (default `Asia/Kolkata`, can go in `.env`). Records and lectures are stored in UTC, and the backend converts, including daylight saving.
 
 **Rooms and cameras.** Cameras belong to rooms. The seeded `CAM1` is in `R101`. Register another with `PUT /api/cameras/CAM2` and `{"room_id": "R202"}` (the room is created if new; add `"simulated": true` for simulated ones).
 
@@ -278,7 +282,7 @@ The Student view shows one student's own figures; the backend answers from that 
 
 **How the figures are worked out.** Every figure comes from summed seconds over the period shown, never from averaging window percentages. Attention is attentive / (attentive + distracted); presence is (attentive + neutral + distracted) / all recorded seconds. The functions are plain code in `backend/metrics.py` so later teacher figures reuse them.
 
-**Visibility gate.** When presence over the period is below `scores.min_presence_ratio` in `config/classpulse.yaml` (0.5), attention for that period is "insufficient data": the API returns `null` with a `reason`, and the dashboard shows a dash or leaves the week blank.
+**Visibility gate.** When presence over the period is below `scores.min_presence_ratio` in `config/attentio.yaml` (0.5), attention for that period is "insufficient data": the API returns `null` with a `reason`, and the dashboard shows a dash or leaves the week blank.
 
 **Attendance.** A lecture counts as attended when the time in view is at least 50% of the lecture's full scheduled length (start to end, or start to now for an open session). Time with no record counts as not present, and presence is capped at 100%. A student who belongs to a section (the simulated students do) is expected at every lecture of that section that has started, so a lecture they have no records in counts as not present. A student without a section, such as `STU001`, is listed only for lectures they have at least one record in. A lecture still running is measured against its full length, so it can read "so far".
 
@@ -300,7 +304,7 @@ The Teacher view gives a teacher feedback on their lectures, not a ranking. The 
 
 **Range.** Across the teacher's students, mean +/- z x sd / sqrt(n), with sd the sample standard deviation of the per-student means and z the normal quantile for `teachers.range_level` (1.96 for 0.95). A normal approximation: fine for tens of students, rough for a handful. One student gives no range. The number of students is returned with every figure and the number of lectures with the teacher.
 
-**Hiding.** Until a teacher has `teachers.min_lectures` (5) lectures with records, both figures are `null` with the reason "fewer than 5 lectures". Both settings are in the `teachers:` section of `config/classpulse.yaml`.
+**Hiding.** Until a teacher has `teachers.min_lectures` (5) lectures with records, both figures are `null` with the reason "fewer than 5 lectures". Both settings are in the `teachers:` section of `config/attentio.yaml`.
 
 **What this can and cannot do.** The self-comparison does not remove a time-slot penalty: a teacher who mostly teaches at a bad time of day is still marked down by it. The slot-adjusted figure takes the slot's average effect out, but it cannot separate a teacher from a slot they always teach in: if only one teacher ever teaches at 14:00, the 14:00 effect and that teacher's effect are the same number, and the adjustment removes both. The figures are feedback, not proof of a teacher's quality. They need several teachers sharing each slot, and the Teacher view says so under the Student groups card.
 
@@ -312,7 +316,7 @@ The Teacher view gives a teacher feedback on their lectures, not a ranking. The 
 
 ## Simulator
 
-The simulator fills ClassPulse with a realistic classroom history so the analytics have something to show. It is an ordinary client of the backend: it uploads its timetable through the timetable upload (`simulated=true`), registers cameras and students, stores the true effects, and sends attention records through `POST /api/records`. It never writes to the database. Only the data is artificial.
+The simulator fills Attentio with a realistic classroom history so the analytics have something to show. It is an ordinary client of the backend: it uploads its timetable through the timetable upload (`simulated=true`), registers cameras and students, stores the true effects, and sends attention records through `POST /api/records`. It never writes to the database. Only the data is artificial.
 
 ```powershell
 python -m simulator seed                 # wipes the simulated data, then generates and sends a cohort
@@ -321,7 +325,7 @@ python -m simulator seed --weeks 2 --seed 7 --backend-url http://127.0.0.1:8012
 python -m simulator wipe                 # removes all simulated data
 ```
 
-The defaults are in the `simulator:` section of `config/classpulse.yaml`: 2 sections (`SIM-A`, `SIM-B`) of 30 students (`SIM-A01` to `SIM-B30`), 5 teachers, 4 weeks of lectures ending today (weekdays, four 50-minute slots a day: 09:00, 10:00, 11:00, 14:00; rooms `SIM-R201`, `SIM-R202`, cameras `SIM-CAM-201`, `SIM-CAM-202`). The backend must be running. A full run is about 450,000 records and takes a few minutes; progress is printed. The same seed gives the same data. Seeding also uploads the simulated marks through the marks endpoint (see Marks), and `wipe` removes them.
+The defaults are in the `simulator:` section of `config/attentio.yaml`: 2 sections (`SIM-A`, `SIM-B`) of 30 students (`SIM-A01` to `SIM-B30`), 5 teachers, 4 weeks of lectures ending today (weekdays, four 50-minute slots a day: 09:00, 10:00, 11:00, 14:00; rooms `SIM-R201`, `SIM-R202`, cameras `SIM-CAM-201`, `SIM-CAM-202`). The backend must be running. A full run is about 450,000 records and takes a few minutes; progress is printed. The same seed gives the same data. Seeding also uploads the simulated marks through the marks endpoint (see Marks), and `wipe` removes them.
 
 **Built-in effects (the right answer).** The mean attention of a window is `student baseline + section effect + teacher effect + slot effect`, plus noise, with some neutral time, some not-visible windows and a few absences:
 
@@ -335,7 +339,7 @@ The defaults are in the `simulator:` section of `config/classpulse.yaml`: 2 sect
 
 **Student archetypes** (`engaged`, `average`, `struggling` (attentive, but marks will be low), `disengaged`) set each student's baseline and how often they are absent or not visible. The archetype is stored on the student (`students.archetype`, returned by `GET /api/students`) and is read by the marks simulator (see Marks). The true effects are stored in the `simulation_effects` table and returned by `GET /api/simulation`.
 
-**Marking in the dashboard.** Any view showing simulated data shows a banner ("Simulated data — generated cohort of 60 students over 4 weeks, not real classroom records", counts taken from `GET /api/simulation`). To look at a simulated student's view, sign in as that student (for example `sim-a01@classpulse.test`, see Signing in).
+**Marking in the dashboard.** Any view showing simulated data shows a banner ("Simulated data — generated cohort of 60 students over 4 weeks, not real classroom records", counts taken from `GET /api/simulation`). To look at a simulated student's view, sign in as that student (for example `sim-a01@attentio.test`, see Signing in).
 
 **Before a demo, reseed.** The data ends on the day it was generated, so "the last 4 weeks" move on. Run `python -m simulator seed` on the day (it wipes the old simulation first), and `python -m simulator wipe` to take it all out. Live data (`STU001`, `R101`, `CAM1`, the live timetable and live records) is never touched by either.
 
@@ -352,7 +356,7 @@ The Admin view opens with feedback for all teachers, then the timetable, manual 
 
 ## Marks
 
-Teachers upload the marks of tests they already run, and ClassPulse links them to attention.
+Teachers upload the marks of tests they already run, and Attentio links them to attention.
 
 **File format.** A CSV (UTF-8) or Excel (.xlsx, first sheet) file with the columns `register_no`, `marks` and `max_marks`; see `samples/marks.csv`. Headers are matched ignoring case, spaces and punctuation, and a few variants are accepted (`Register No`, `Roll No`, `Marks Obtained`, `Score`, `Out of`, `Maximum Marks`, and so on). Other columns are ignored, blank lines are skipped, and a file that starts like a zip archive is read as Excel whatever its name. Register numbers match case-insensitively. A student who was away is simply left out of the file.
 
@@ -364,7 +368,7 @@ Teachers upload the marks of tests they already run, and ClassPulse links them t
 
 **Covered lectures.** A test covers every lecture of its subject taught by its teacher to the sections of the students in the test, after the previous test of the same teacher and subject for that section (from the beginning when there is none) up to the test date. Dates are local calendar dates; a lecture on the day of a test counts for that test, and a test on the same date as another is a sibling, not its previous test. Manual sessions with no section are not covered.
 
-**Student groups.** For a chosen test, each student's attention is attentive / (attentive + distracted) over their summed seconds in the covered lectures, with the usual visibility gate: a student in view for less than `scores.min_presence_ratio` of the recorded time, or with no records, is "insufficient data" and is not grouped. Attention "above 60%" means strictly above `marks.attention_line` in `config/classpulse.yaml` (0.60; exactly 60% is at or below), and "marks above the class median" means strictly above the median score of everybody in the test (a score equal to the median is at or below). Each student also gets an attention percentile among the students with a value, kept for reference; the groups use the attention value itself.
+**Student groups.** For a chosen test, each student's attention is attentive / (attentive + distracted) over their summed seconds in the covered lectures, with the usual visibility gate: a student in view for less than `scores.min_presence_ratio` of the recorded time, or with no records, is "insufficient data" and is not grouped. Attention "above 60%" means strictly above `marks.attention_line` in `config/attentio.yaml` (0.60; exactly 60% is at or below), and "marks above the class median" means strictly above the median score of everybody in the test (a score equal to the median is at or below). Each student also gets an attention percentile among the students with a value, kept for reference; the groups use the attention value itself.
 
 | | Marks above class median | Marks at or below median |
 | --- | --- | --- |
@@ -384,16 +388,16 @@ On the default cohort the "struggling" students (attentive, low marks) land in A
 **Demo.**
 
 1. Start the backend and the dashboard, and run `python -m simulator seed` (it also uploads the marks and creates the simulated accounts).
-2. Sign in as `anita.menon@classpulse.test` with the demo password (Signing in). The Marks vs own percentile card shows the figure and "From N tests". The Student groups card shows the 2 x 2 grid for her newest test; use its picker to change test and open Students in each group to list the students.
+2. Sign in as `anita.menon@attentio.test` with the demo password (Signing in). The Marks vs own percentile card shows the figure and "From N tests". The Student groups card shows the 2 x 2 grid for her newest test; use its picker to change test and open Students in each group to list the students.
 3. To upload your own: in the sidebar choose `samples/marks.csv` under Marks file, check that Subject is Algorithms, choose a Test date and a name such as "Sample", and press Upload marks. A message says how many students were stored, or lists the rows to fix. The new test appears in the Student groups picker.
-4. Sign out and sign in as an admin to see each teacher's marks figure in the Marks column (still no student), and as `sim-a01@classpulse.test` to see that student's own marks and percentile for each test. Without marks every view says "No marks yet".
+4. Sign out and sign in as an admin to see each teacher's marks figure in the Marks column (still no student), and as `sim-a01@attentio.test` to see that student's own marks and percentile for each test. Without marks every view says "No marks yet".
 
 ## Pointing at another backend
 
-Set `CLASSPULSE_BACKEND_URL` (in the environment, or in `.env`) to override `backend.url` in `config/classpulse.yaml` for the dashboard, the worker and the simulator, for example:
+Set `ATTENTIO_BACKEND_URL` (in the environment, or in `.env`) to override `backend.url` in `config/attentio.yaml` for the dashboard, the worker and the simulator, for example:
 
 ```powershell
-$env:CLASSPULSE_BACKEND_URL = "http://127.0.0.1:8012"
+$env:ATTENTIO_BACKEND_URL = "http://127.0.0.1:8012"
 streamlit run dashboard/app.py
 ```
 
@@ -412,7 +416,7 @@ The simulator's `--backend-url` option wins over it.
 
 Interactive docs are at http://127.0.0.1:8000/docs. Times in responses are UTC.
 
-**Access.** Send `Authorization: Bearer <token>` (from `POST /api/auth/login`) on every call below. A missing, unknown, expired or revoked token is 401 (`WWW-Authenticate: Bearer`); a valid caller who may not use the endpoint is 403. "Student" endpoints (`/api/students/{register_no}/live|profile|current|marks`) are only for that student; "teacher" endpoints (`/api/teachers/{id}/feedback|marks/tests|subjects`, `/api/marks/tests/{id}/groups` and `/api/lectures/{id}/timeline` for the teacher's own test or lecture) only for that teacher; `GET /api/admin/overview`, `GET /api/teachers/feedback`, `POST /api/sessions` and `POST /api/sessions/{id}/stop` only for an admin; `POST /api/records`, `POST /api/timetable`, `GET /api/timetable`, `GET /api/rooms`, `PUT /api/cameras/{id}`, `GET` and `POST /api/students`, `GET /api/lectures`, `GET /api/sessions` and `PUT` and `DELETE /api/simulation` for an admin or the service key (`X-ClassPulse-Key`); `POST /api/marks/tests` for the teacher whose test it is, an admin or the service key. The full table is in Signing in.
+**Access.** Send `Authorization: Bearer <token>` (from `POST /api/auth/login`) on every call below. A missing, unknown, expired or revoked token is 401 (`WWW-Authenticate: Bearer`); a valid caller who may not use the endpoint is 403. "Student" endpoints (`/api/students/{register_no}/live|profile|current|marks`) are only for that student; "teacher" endpoints (`/api/teachers/{id}/feedback|marks/tests|subjects`, `/api/marks/tests/{id}/groups` and `/api/lectures/{id}/timeline` for the teacher's own test or lecture) only for that teacher; `GET /api/admin/overview`, `GET /api/teachers/feedback`, `POST /api/sessions` and `POST /api/sessions/{id}/stop` only for an admin; `POST /api/records`, `POST /api/timetable`, `GET /api/timetable`, `GET /api/rooms`, `PUT /api/cameras/{id}`, `GET` and `POST /api/students`, `GET /api/lectures`, `GET /api/sessions` and `PUT` and `DELETE /api/simulation` for an admin or the service key (`X-Attentio-Key`); `POST /api/marks/tests` for the teacher whose test it is, an admin or the service key. The full table is in Signing in.
 
 **Sign-in and accounts**
 

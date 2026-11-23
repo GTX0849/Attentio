@@ -78,7 +78,7 @@ class LearningConfig:
 
     @classmethod
     def from_config(cls, section: dict[str, Any]) -> "LearningConfig":
-        """Read the `states.learning:` section of config/classpulse.yaml."""
+        """Read the `states.learning:` section of config/attentio.yaml."""
         values: dict[str, Any] = {name: float(section[name]) for name in cls.__dataclass_fields__}
         values["max_samples"] = int(section["max_samples"])
         return cls(**values)

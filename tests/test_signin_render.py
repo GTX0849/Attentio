@@ -59,7 +59,7 @@ def test_before_sign_in_only_the_sign_in_page_is_shown(fake_backend: dict[str, l
     at = first_page()
     assert not at.exception
     page = html_of(at)
-    assert "Sign in to ClassPulse" in page
+    assert "Sign in to Attentio" in page
     assert "Use the email and password your department gave you" in page
     assert [t.label for t in at.text_input] == ["Email", "Password"]
     assert [b.label for b in at.button] == ["Sign in"]
@@ -83,7 +83,7 @@ def test_there_is_one_form_for_everyone_no_role_cards_and_no_role_wording(fake_b
 def test_the_left_panel_follows_the_design_copy(fake_backend: dict[str, list[Any]]) -> None:  # noqa: F811
     page = html_of(first_page())
     for text in (
-        "ClassPulse",
+        "Attentio",
         "Department of Computer Science",
         "See how each lecture lands, minute by minute",
         "Attention from the classroom camera, joined to your timetable and test marks. Students, teachers and "
@@ -109,7 +109,7 @@ def test_the_preview_is_a_static_stacked_chart_in_the_four_state_colours() -> No
 
 def test_the_wordmark_is_a_blue_square_with_four_bars() -> None:
     markup = signin.mark_html()
-    assert markup.count("<span style=") == 4 and "ClassPulse" in markup
+    assert markup.count("<span style=") == 4 and "Attentio" in markup
 
 
 def test_the_sign_in_copy_has_no_exclamation_marks_emoji_or_final_periods_on_labels() -> None:
@@ -194,7 +194,7 @@ def test_signing_in_lands_in_the_view_of_the_accounts_own_role(
     assert not at.exception
     page = html_of(at)
     assert marker in page
-    assert "Sign in to ClassPulse" not in page
+    assert "Sign in to Attentio" not in page
     # no role switcher, no picker; who is signed in, and Sign out, are in the sidebar
     assert not at.sidebar.get("button_group")
     assert "role" not in at.session_state
@@ -235,7 +235,7 @@ def test_signing_out_returns_to_the_sign_in_page_and_forgets_everything(
     assert fake_backend["logout"] == ["http://127.0.0.1:8000"] or len(fake_backend["logout"]) == 1
     assert [t.label for t in at.text_input] == ["Email", "Password"]
     assert session.AUTH_KEY not in at.session_state and "leftover" not in at.session_state
-    assert "Sign in to ClassPulse" in html_of(at)
+    assert "Sign in to Attentio" in html_of(at)
 
 
 def test_an_expired_session_returns_to_sign_in_with_a_message_in_every_view(

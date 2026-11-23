@@ -71,7 +71,7 @@ def test_a_postgresql_url_from_a_managed_host_works_without_the_plus_psycopg_par
 
 
 def test_a_missing_database_is_created(url: str) -> None:
-    name = f"classpulse_missing_{uuid.uuid4().hex[:8]}"
+    name = f"attentio_missing_{uuid.uuid4().hex[:8]}"
     target = make_url(url).set(database=name).render_as_string(hide_password=False)
     try:
         assert not database_exists(url, name)
@@ -83,7 +83,7 @@ def test_a_missing_database_is_created(url: str) -> None:
 
 def test_a_missing_database_the_user_may_not_create_gives_a_clear_error_without_the_password(url: str) -> None:
     role = f"cp_limited_{uuid.uuid4().hex[:8]}"
-    name = f"classpulse_missing_{uuid.uuid4().hex[:8]}"
+    name = f"attentio_missing_{uuid.uuid4().hex[:8]}"
     admin = create_engine(make_url(url).set(database="postgres"), isolation_level="AUTOCOMMIT")
     try:
         with admin.connect() as conn:

@@ -15,7 +15,7 @@ Each run writes its own file: `.spool/tuning/<camera_id>/<UTC timestamp>.csv`, f
 `.spool/tuning/CAM1/20261120T093015Z.csv` (`.spool/` is git-ignored; `camera_id` is made safe for a
 path: anything other than letters, digits, `.`, `_` and `-` becomes `_`). UTF-8, `\n` line ends:
 
-    line 1   `# classpulse tune v1 camera=<camera id>`   (comment; skip lines starting with `#`)
+    line 1   `# attentio tune v1 camera=<camera id>`   (comment; skip lines starting with `#`)
     line 2   the header: t,label,pitch,yaw,ref_pitch,ref_yaw,rel_pitch,rel_yaw,eyes_closed,face_size_pct,state
     line 3+  one row per scoring tick
 
@@ -185,7 +185,7 @@ class TuneRecorder:
                 n += 1
         self._path = path
         header = " ".join(self._camera_id.split())  # one line, whatever the id contains
-        self._file.write(f"# classpulse tune v{FORMAT_VERSION} camera={header}\n")
+        self._file.write(f"# attentio tune v{FORMAT_VERSION} camera={header}\n")
         self._file.write(",".join(COLUMNS) + "\n")
         self._file.flush()
 

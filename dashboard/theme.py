@@ -1,6 +1,6 @@
 """Design tokens and small presentational helpers shared by every dashboard view.
 
-Colours come from the ClassPulse design. The page theme itself (primary colour,
+Colours come from the Attentio design. The page theme itself (primary colour,
 background, fonts) lives in `.streamlit/config.toml`; this module holds the
 colours that Streamlit's theme has no slot for and the helpers that draw the
 repeated pieces: header, stat card, simulated banner and the states legend.

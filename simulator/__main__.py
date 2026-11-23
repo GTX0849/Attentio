@@ -13,7 +13,7 @@ from simulator.credentials import write_credentials
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m simulator",
-        description="Fill ClassPulse with a simulated classroom history through the backend API.",
+        description="Fill Attentio with a simulated classroom history through the backend API.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     seed_cmd = sub.add_parser("seed", help="wipe the simulated data, then generate and send a new cohort")
@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     for command in (seed_cmd, sub.add_parser("wipe", help="remove all simulated data")):
         command.add_argument(
             "--backend-url",
-            help="backend address (default: CLASSPULSE_BACKEND_URL, else backend.url in the config)",
+            help="backend address (default: ATTENTIO_BACKEND_URL, else backend.url in the config)",
         )
     return parser
 
@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     if report.password_generated:
         print(f"Their password, shown only now and also saved in that file: {report.demo_password}")
     else:
-        print("Their password is the value of CLASSPULSE_DEMO_PASSWORD")
+        print("Their password is the value of ATTENTIO_DEMO_PASSWORD")
     return 0
 
 
