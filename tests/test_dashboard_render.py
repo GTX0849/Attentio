@@ -581,3 +581,10 @@ def test_the_teacher_view_shows_the_banner_for_a_simulated_teacher(
     )
     assert "Simulated data" not in html_of(run_app("teacher", teacher_id=1))
     assert BANNER in html_of(run_app("teacher", teacher_id=2, display_name="Dr Sim"))
+
+
+def test_the_sidebar_wordmark_says_attentio_and_nothing_of_the_old_name() -> None:
+    html = theme.wordmark_html()
+    assert ">Attentio<" in html
+    for old in ("ClassPulse", "Class", "Pulse"):
+        assert old not in html

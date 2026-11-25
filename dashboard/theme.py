@@ -116,7 +116,7 @@ def simulated_banner_html(text: str) -> str:
 def wordmark_html() -> str:
     return (
         f'<div style="font-size:20px;font-weight:600;letter-spacing:-0.01em;color:{TEXT};'
-        f'padding:4px 0 8px 0;">Class<span style="color:{PRIMARY};">Pulse</span></div>'
+        f'padding:4px 0 8px 0;">Attentio</div>'
     )
 
 
